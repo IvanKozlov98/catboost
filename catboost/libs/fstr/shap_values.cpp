@@ -108,6 +108,7 @@ static void UpdateShapByFeaturePath(
     int approxDimension,
     bool isOblivious,
     double averageTreeApprox,
+    double conditionFeatureFraction,
     TVector<TShapValue>* shapValuesInternal
 ) {
     const int approxDimOffset = isOblivious ? approxDimension : 1;
@@ -125,7 +126,8 @@ static void UpdateShapByFeaturePath(
                 return shapValue.Feature == element.Feature;
             }
         );
-        const double coefficient = weightSum * (element.OnePathsFraction - element.ZeroPathsFraction);
+        const double coefficient =
+            conditionFeatureFraction * weightSum * (element.OnePathsFraction - element.ZeroPathsFraction);
         if (sameFeatureShapValue == shapValuesInternal->end()) {
             shapValuesInternal->emplace_back(element.Feature, approxDimension);
             for (int dimension = 0; dimension < approxDimension; ++dimension) {
@@ -138,6 +140,51 @@ static void UpdateShapByFeaturePath(
                 sameFeatureShapValue->Value[dimension] += addValue;
             }
         }
+    }
+}
+
+static void UpdateConditionFeatureFractions(
+    const TFixedFeatureParams& fixedFeatureParams,
+    const double hotCoefficient,
+    const double coldCoefficient,
+    double *hotConditionFeatureFraction,
+    double *coldConditionFeatureFraction
+) {
+    switch (fixedFeatureParams.FixedFeatureMode) {
+        case TFixedFeatureParams::EMode::FixedOn: {
+            (*coldConditionFeatureFraction) = 0;
+            Y_ASSERT(hotConditionFeatureFraction == nullptr);
+            break;
+        }
+        case TFixedFeatureParams::EMode::FixedOff: {
+            (*hotConditionFeatureFraction) *= hotCoefficient;
+            (*coldConditionFeatureFraction) *= coldCoefficient;
+            break;
+        }
+        default: {
+            Y_UNREACHABLE();
+        }
+    }
+}
+
+static void ExtendFeaturePathIfFeatureNotFixed(
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<TFeaturePathElement>& oldFeaturePath,
+    double zeroPathsFraction,
+    double onePathsFraction,
+    int feature,
+    TVector<TFeaturePathElement>* featurePath
+) {
+    if (!fixedFeatureParams.Defined() || 
+        (fixedFeatureParams->FixedFeatureMode == TFixedFeatureParams::EMode::NotFixed || fixedFeatureParams->Feature != feature)) {
+        *featurePath = ExtendFeaturePath(
+            oldFeaturePath,
+            zeroPathsFraction,
+            onePathsFraction,
+            feature);
+    } else {
+        const size_t pathLength = oldFeaturePath.size();
+        *featurePath = TVector<TFeaturePathElement>(oldFeaturePath.begin(), oldFeaturePath.begin() + pathLength);
     }
 }
 
@@ -154,14 +201,25 @@ static void CalcObliviousInternalShapValuesForLeafRecursive(
     double onePathsFraction,
     int feature,
     bool calcInternalValues,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const double conditionFeatureFraction,
     TVector<TShapValue>* shapValuesInternal,
     double averageTreeApprox
 ) {
-    TVector<TFeaturePathElement> featurePath = ExtendFeaturePath(
+    if (FuzzyEquals(1.0 + conditionFeatureFraction, 1.0 + 0.0)) {
+        return;
+    }
+
+    TVector<TFeaturePathElement> featurePath;
+    ExtendFeaturePathIfFeatureNotFixed(
+        fixedFeatureParams,
         oldFeaturePath,
         zeroPathsFraction,
         onePathsFraction,
-        feature);
+        feature,
+        &featurePath
+    );
+
     if (depth == forest.GetTreeSizes()[treeIdx]) {
         UpdateShapByFeaturePath(
             featurePath,
@@ -170,6 +228,7 @@ static void CalcObliviousInternalShapValuesForLeafRecursive(
             forest.GetDimensionsCount(),
             /*isOblivious*/ true,
             averageTreeApprox,
+            conditionFeatureFraction,
             shapValuesInternal
         );
     } else {
@@ -199,10 +258,23 @@ static void CalcObliviousInternalShapValuesForLeafRecursive(
         const bool isGoRight = (documentLeafIdx >> remainingDepth) & 1;
         const size_t goNodeIdx = nodeIdx * 2 + isGoRight;
         const size_t skipNodeIdx = nodeIdx * 2 + !isGoRight;
+        const double hotCoefficient = subtreeWeights[depth + 1][goNodeIdx] / subtreeWeights[depth][nodeIdx];
+        const double coldCoefficient = subtreeWeights[depth + 1][skipNodeIdx] / subtreeWeights[depth][nodeIdx];
+        double hotConditionFeatureFraction = conditionFeatureFraction;
+        double coldConditionFeatureFraction = conditionFeatureFraction;
+        if (fixedFeatureParams.Defined() && combinationClass == fixedFeatureParams->Feature) {
+            const bool isFixedOnFeature = fixedFeatureParams->FixedFeatureMode == TFixedFeatureParams::EMode::FixedOn;
+            UpdateConditionFeatureFractions(
+                fixedFeatureParams.GetRef(),
+                hotCoefficient,
+                coldCoefficient,
+                isFixedOnFeature ? nullptr : &hotConditionFeatureFraction,
+                &coldConditionFeatureFraction
+            );
+        }
 
         if (!FuzzyEquals(1 + subtreeWeights[depth + 1][goNodeIdx], 1 + 0.0)) {
-            double newZeroPathsFractionGoNode = newZeroPathsFraction * subtreeWeights[depth + 1][goNodeIdx]
-                / subtreeWeights[depth][nodeIdx];
+            double newZeroPathsFractionGoNode = newZeroPathsFraction * hotCoefficient;
             CalcObliviousInternalShapValuesForLeafRecursive(
                 forest,
                 binFeatureCombinationClass,
@@ -216,14 +288,15 @@ static void CalcObliviousInternalShapValuesForLeafRecursive(
                 newOnePathsFraction,
                 combinationClass,
                 calcInternalValues,
+                fixedFeatureParams,
+                hotConditionFeatureFraction,
                 shapValuesInternal,
                 averageTreeApprox
             );
         }
 
         if (!FuzzyEquals(1 + subtreeWeights[depth + 1][skipNodeIdx], 1 + 0.0)) {
-            double newZeroPathsFractionSkipNode = newZeroPathsFraction * subtreeWeights[depth + 1][skipNodeIdx]
-                / subtreeWeights[depth][nodeIdx];
+            double newZeroPathsFractionSkipNode = newZeroPathsFraction * coldCoefficient;
             CalcObliviousInternalShapValuesForLeafRecursive(
                 forest,
                 binFeatureCombinationClass,
@@ -237,6 +310,8 @@ static void CalcObliviousInternalShapValuesForLeafRecursive(
                 /*onePathFraction*/ 0,
                 combinationClass,
                 calcInternalValues,
+                fixedFeatureParams,
+                coldConditionFeatureFraction,
                 shapValuesInternal,
                 averageTreeApprox
             );
@@ -256,15 +331,25 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
     double zeroPathsFraction,
     double onePathsFraction,
     int feature,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const double conditionFeatureFraction,
     bool calcInternalValues,
     TVector<TShapValue>* shapValuesInternal,
     double averageTreeApprox
 ) {
-    TVector<TFeaturePathElement> featurePath = ExtendFeaturePath(
+    if (FuzzyEquals(1.0 + conditionFeatureFraction, 1.0 + 0.0)) {
+        return;
+    }
+
+    TVector<TFeaturePathElement> featurePath;
+    ExtendFeaturePathIfFeatureNotFixed(
+        fixedFeatureParams,
         oldFeaturePath,
         zeroPathsFraction,
         onePathsFraction,
-        feature);
+        feature,
+        &featurePath
+    );
 
     const auto& node = forest.GetNonSymmetricStepNodes()[nodeIdx];
     const size_t startOffset = forest.GetTreeStartOffsets()[treeIdx];
@@ -288,6 +373,7 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
             forest.GetDimensionsCount(),
             /*isOblivious*/ false,
             averageTreeApprox,
+            conditionFeatureFraction,
             shapValuesInternal
         );
     }
@@ -312,10 +398,26 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
         newOnePathsFraction = featurePath[sameFeatureIndex].OnePathsFraction;
         featurePath = UnwindFeaturePath(featurePath, sameFeatureIndex);
     }
-
+    
+    const double hotCoefficient = goNodeIdx != nodeIdx ? 
+        subtreeWeights[0][goNodeIdx - startOffset] / subtreeWeights[0][nodeIdx - startOffset] : -1.0;
+    const double coldCoefficient = skipNodeIdx != nodeIdx ? 
+        subtreeWeights[0][skipNodeIdx - startOffset] / subtreeWeights[0][nodeIdx - startOffset] : -1.0;
+    double hotConditionFeatureFraction = conditionFeatureFraction;
+    double coldConditionFeatureFraction = conditionFeatureFraction;
+    if (fixedFeatureParams.Defined() && combinationClass == fixedFeatureParams->Feature) {
+        const bool isFixedOnFeature = fixedFeatureParams->FixedFeatureMode == TFixedFeatureParams::EMode::FixedOn;
+        UpdateConditionFeatureFractions(
+            fixedFeatureParams.GetRef(),
+            hotCoefficient,
+            coldCoefficient,
+            isFixedOnFeature ? nullptr : &hotConditionFeatureFraction,
+            &coldConditionFeatureFraction
+        );
+    }
+    
     if (goNodeIdx != nodeIdx && !FuzzyEquals(1 + subtreeWeights[0][goNodeIdx - startOffset], 1 + 0.0)) {
-        double newZeroPathsFractionGoNode = newZeroPathsFraction * subtreeWeights[0][goNodeIdx - startOffset]
-            / subtreeWeights[0][nodeIdx - startOffset];
+        double newZeroPathsFractionGoNode = newZeroPathsFraction * hotCoefficient;
         CalcNonObliviousInternalShapValuesForLeafRecursive(
             forest,
             binFeatureCombinationClass,
@@ -328,6 +430,8 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
             newZeroPathsFractionGoNode,
             newOnePathsFraction,
             combinationClass,
+            fixedFeatureParams,
+            hotConditionFeatureFraction,
             calcInternalValues,
             shapValuesInternal,
             averageTreeApprox
@@ -335,8 +439,7 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
     }
 
     if (skipNodeIdx != nodeIdx && !FuzzyEquals(1 + subtreeWeights[0][skipNodeIdx - startOffset], 1 + 0.0)) {
-        double newZeroPathsFractionSkipNode = newZeroPathsFraction * subtreeWeights[0][skipNodeIdx - startOffset]
-            / subtreeWeights[0][nodeIdx - startOffset];
+        double newZeroPathsFractionSkipNode = newZeroPathsFraction * coldCoefficient;
         CalcNonObliviousInternalShapValuesForLeafRecursive(
             forest,
             binFeatureCombinationClass,
@@ -349,6 +452,8 @@ static void CalcNonObliviousInternalShapValuesForLeafRecursive(
             newZeroPathsFractionSkipNode,
             /*onePathFraction*/ 0,
             combinationClass,
+            fixedFeatureParams,
+            coldConditionFeatureFraction,
             calcInternalValues,
             shapValuesInternal,
             averageTreeApprox
@@ -398,6 +503,7 @@ static inline void CalcObliviousShapValuesForLeaf(
     size_t treeIdx,
     const TVector<TVector<double>>& subtreeWeights,
     bool calcInternalValues,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     TVector<TShapValue>* shapValues,
     double averageTreeApprox
 ) {
@@ -417,6 +523,8 @@ static inline void CalcObliviousShapValuesForLeaf(
             /*onePathFraction*/ 1,
             /*feature*/ -1,
             calcInternalValues,
+            fixedFeatureParams,
+            /*conditionFeatureFraction*/ 1,
             shapValues,
             averageTreeApprox
         );
@@ -435,6 +543,8 @@ static inline void CalcObliviousShapValuesForLeaf(
             /*onePathFraction*/ 1,
             /*feature*/ -1,
             calcInternalValues,
+            fixedFeatureParams,
+            /*conditionFeatureFraction*/ 1,
             &shapValuesInternal,
             averageTreeApprox
         );
@@ -450,6 +560,7 @@ static inline void CalcNonObliviousShapValuesForLeaf(
     size_t treeIdx,
     const TVector<TVector<double>>& subtreeWeights,
     bool calcInternalValues,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     TVector<TShapValue>* shapValues,
     double averageTreeApprox
 ) {
@@ -468,6 +579,8 @@ static inline void CalcNonObliviousShapValuesForLeaf(
             /*zeroPathFraction*/ 1,
             /*onePathFraction*/ 1,
             /*feature*/ -1,
+            fixedFeatureParams,
+            /*conditionFeatureFraction*/ 1.0,
             calcInternalValues,
             shapValues,
             averageTreeApprox
@@ -486,6 +599,8 @@ static inline void CalcNonObliviousShapValuesForLeaf(
             /*zeroPathFraction*/ 1,
             /*onePathFraction*/ 1,
             /*feature*/ -1,
+            fixedFeatureParams,
+            /*conditionFeatureFraction*/ 1.0,
             calcInternalValues,
             &shapValuesInternal,
             averageTreeApprox
@@ -725,13 +840,14 @@ void CalcShapValuesForDocumentMulti(
     const TFullModel& model,
     const TShapPreparedTrees& preparedTrees,
     const NCB::NModelEvaluation::IQuantizedData* binarizedFeaturesForBlock,
-    int flatFeatureCount,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    int featuresCount,
     TConstArrayRef<NModelEvaluation::TCalcerIndexType> docIndexes,
     size_t documentIdxInBlock,
     TVector<TVector<double>>* shapValues
 ) {
     const int approxDimension = model.GetDimensionsCount();
-    shapValues->assign(approxDimension, TVector<double>(flatFeatureCount + 1, 0.0));
+    shapValues->assign(approxDimension, TVector<double>(featuresCount + 1, 0.0));
     const size_t treeCount = model.GetTreeCount();
     for (size_t treeIdx = 0; treeIdx < treeCount; ++treeIdx) {
         if (preparedTrees.CalcShapValuesByLeafForAllTrees && model.IsOblivious()) {
@@ -751,6 +867,7 @@ void CalcShapValuesForDocumentMulti(
                     treeIdx,
                     preparedTrees.SubtreeWeightsForAllTrees[treeIdx],
                     preparedTrees.CalcInternalValues,
+                    fixedFeatureParams,
                     &shapValuesByLeaf,
                     preparedTrees.AverageApproxByTree[treeIdx]
                 );
@@ -769,6 +886,7 @@ void CalcShapValuesForDocumentMulti(
                     treeIdx,
                     preparedTrees.SubtreeWeightsForAllTrees[treeIdx],
                     preparedTrees.CalcInternalValues,
+                    fixedFeatureParams,
                     &shapValuesByLeaf,
                     preparedTrees.AverageApproxByTree[treeIdx]
                 );
@@ -781,25 +899,12 @@ void CalcShapValuesForDocumentMulti(
         }
 
         for (int dimension = 0; dimension < approxDimension; ++dimension) {
-            (*shapValues)[dimension][flatFeatureCount] +=
+            (*shapValues)[dimension][featuresCount] +=
                     preparedTrees.MeanValuesForAllTrees[treeIdx][dimension];
         }
     }
     if (approxDimension == 1) {
-        (*shapValues)[0][flatFeatureCount] += model.GetScaleAndBias().Bias;
-    }
-}
-
-static void CheckNonZeroApproxForZeroWeighLeaf(const TFullModel& model) {
-    for (size_t leafIdx = 0; leafIdx < model.ModelTrees->GetLeafWeights().size(); ++leafIdx) {
-        size_t approxDimension = model.GetDimensionsCount();
-        if (model.ModelTrees->GetLeafWeights()[leafIdx] == 0) {
-            double leafSumApprox = 0;
-            for (size_t approxIdx = 0; approxIdx < approxDimension; ++approxIdx) {
-                leafSumApprox += abs(model.ModelTrees->GetLeafValues()[leafIdx * approxDimension + approxIdx]);
-            }
-            CB_ENSURE(leafSumApprox < 1e-9, "Cannot calc shap values, model contains non zero approx for zero-weight leaf");
-        }
+        (*shapValues)[0][featuresCount] += model.GetScaleAndBias().Bias;
     }
 }
 
@@ -808,12 +913,13 @@ static void CalcShapValuesForDocumentBlockMulti(
     const IFeaturesBlockIterator& featuresBlockIterator,
     int flatFeatureCount,
     const TShapPreparedTrees& preparedTrees,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     size_t start,
     size_t end,
     NPar::TLocalExecutor* localExecutor,
     TVector<TVector<TVector<double>>>* shapValuesForAllDocuments
 ) {
-    CheckNonZeroApproxForZeroWeighLeaf(model);
+    CheckNonZeroApproxForZeroWeightLeaf(model);
 
     const size_t documentCount = end - start;
 
@@ -833,6 +939,7 @@ static void CalcShapValuesForDocumentBlockMulti(
             model,
             preparedTrees,
             binarizedFeaturesForBlock.Get(),
+            fixedFeatureParams,
             flatFeatureCount,
             MakeArrayRef(indexes.data() + documentIdxInBlock * model.GetTreeCount(), model.GetTreeCount()),
             documentIdxInBlock,
@@ -855,6 +962,7 @@ static void CalcShapValuesByLeafForTreeBlock(
     int start,
     int end,
     bool calcInternalValues,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     NPar::TLocalExecutor* localExecutor,
     TShapPreparedTrees* preparedTrees
 ) {
@@ -877,6 +985,7 @@ static void CalcShapValuesByLeafForTreeBlock(
                     treeIdx,
                     preparedTrees->SubtreeWeightsForAllTrees[treeIdx],
                     calcInternalValues,
+                    fixedFeatureParams,
                     &shapValuesByLeaf[leafIdx],
                     preparedTrees->AverageApproxByTree[treeIdx]
                 );
@@ -1029,8 +1138,8 @@ static void InitLeafWeights(
                 dataset,
                 "To calculate shap values, either a model with leaf weights, or a dataset are required."
         );
-        CB_ENSURE(dataset->ObjectsGrouping->GetObjectCount() != 0, "no docs in pool");
-        CB_ENSURE(dataset->MetaInfo.GetFeatureCount() > 0, "no features in pool");
+        CB_ENSURE(dataset->ObjectsGrouping->GetObjectCount() != 0, "To calculate shap values, dataset must contain objects.");
+        CB_ENSURE(dataset->MetaInfo.GetFeatureCount() > 0, "To calculate shap values, dataset must contain features.");
         *leafWeights = CollectLeavesStatistics(*dataset, model, localExecutor);
     } else {
         leafWeights->assign(leafWeightsOfModels.begin(), leafWeightsOfModels.end());
@@ -1053,6 +1162,7 @@ static inline bool IsMultiClassification(const TFullModel& model) {
 
 void CalcShapValuesByLeaf(
     const TFullModel& model,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     bool calcInternalValues,
     NPar::TLocalExecutor* localExecutor,
@@ -1073,6 +1183,7 @@ void CalcShapValuesByLeaf(
             start,
             end,
             calcInternalValues,
+            fixedFeatureParams,
             localExecutor,
             preparedTrees
         );
@@ -1170,6 +1281,7 @@ void CalcShapValuesInternalForFeature(
                             treeIdx,
                             preparedTrees.SubtreeWeightsForAllTrees[treeIdx],
                             preparedTrees.CalcInternalValues,
+                            /*fixedFeatureParams*/ Nothing(),
                             &shapValuesByLeaf,
                             preparedTrees.AverageApproxByTree[treeIdx]
                         );
@@ -1188,6 +1300,7 @@ void CalcShapValuesInternalForFeature(
                             treeIdx,
                             preparedTrees.SubtreeWeightsForAllTrees[treeIdx],
                             preparedTrees.CalcInternalValues,
+                            /*fixedFeatureParams*/ Nothing(),
                             &shapValuesByLeaf,
                             preparedTrees.AverageApproxByTree[treeIdx]
                         );
@@ -1207,6 +1320,7 @@ void CalcShapValuesInternalForFeature(
 static TVector<TVector<TVector<double>>> CalcShapValuesWithPreparedTrees(
     const TFullModel& model,
     const TDataProvider& dataset,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     TShapPreparedTrees* preparedTrees,
     NPar::TLocalExecutor* localExecutor
@@ -1238,6 +1352,7 @@ static TVector<TVector<TVector<double>>> CalcShapValuesWithPreparedTrees(
             *featuresBlockIterator,
             flatFeatureCount,
             *preparedTrees,
+            fixedFeatureParams,
             start,
             end,
             localExecutor,
@@ -1255,6 +1370,7 @@ static TVector<TVector<TVector<double>>> CalcShapValuesWithPreparedTrees(
 TVector<TVector<TVector<double>>> CalcShapValuesMulti(
     const TFullModel& model,
     const TDataProvider& dataset,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
     NPar::TLocalExecutor* localExecutor
@@ -1268,6 +1384,7 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
     );
     CalcShapValuesByLeaf(
         model,
+        fixedFeatureParams,
         logPeriod,
         preparedTrees.CalcInternalValues,
         localExecutor,
@@ -1277,6 +1394,7 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
     return CalcShapValuesWithPreparedTrees(
         model,
         dataset,
+        fixedFeatureParams,
         logPeriod,
         &preparedTrees,
         localExecutor
@@ -1286,6 +1404,7 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
 TVector<TVector<double>> CalcShapValues(
     const TFullModel& model,
     const TDataProvider& dataset,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
     NPar::TLocalExecutor* localExecutor
@@ -1294,6 +1413,7 @@ TVector<TVector<double>> CalcShapValues(
     TVector<TVector<TVector<double>>> shapValuesMulti = CalcShapValuesMulti(
         model,
         dataset,
+        fixedFeatureParams,
         logPeriod,
         mode,
         localExecutor
@@ -1306,6 +1426,70 @@ TVector<TVector<double>> CalcShapValues(
         shapValues[documentIdx] = std::move(shapValuesMulti[documentIdx][0]);
     }
     return shapValues;
+}
+
+static TVector<TVector<TVector<double>>> SwapFeatureAndDocumentAxes(const TVector<TVector<TVector<double>>>& shapValues) {
+    const size_t approxDimension = shapValues[0].size();
+    const size_t documentCount = shapValues.size();
+    const size_t featuresCount = shapValues[0][0].size();
+    TVector<TVector<TVector<double>>> rebasingShapValues(featuresCount);
+    for (size_t featureIdx = 0; featureIdx < featuresCount; ++featureIdx) {
+        rebasingShapValues[featureIdx].resize(approxDimension);
+        for (size_t dimension = 0; dimension < approxDimension; ++dimension) {
+            rebasingShapValues[featureIdx][dimension].resize(documentCount);
+            for (size_t documentIdx = 0; documentIdx < documentCount; ++documentIdx) {
+                rebasingShapValues[featureIdx][dimension][documentIdx] = shapValues[documentIdx][dimension][featureIdx];
+            }
+        }
+    }
+    return rebasingShapValues;
+}
+
+// returned: ShapValues[featureIdx][dim][documentIdx]
+TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
+    const TFullModel& model, 
+    const TVector<TIntrusivePtr<NModelEvaluation::IQuantizedData>>& quantizedFeatures,
+    const TVector<TVector<NModelEvaluation::TCalcerIndexType>>& indexes,
+    const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const size_t documentCount,
+    int logPeriod,
+    TShapPreparedTrees* preparedTrees,
+    NPar::TLocalExecutor* localExecutor
+) {
+    CalcShapValuesByLeaf(
+        model,
+        fixedFeatureParams,
+        logPeriod,
+        preparedTrees->CalcInternalValues,
+        localExecutor,
+        preparedTrees
+    );
+    const TModelTrees& forest = *model.ModelTrees;
+    TVector<TVector<TVector<double>>> shapValues(documentCount);
+    const int featuresCount = preparedTrees->CombinationClassFeatures.size();
+    const size_t documentBlockSize = CB_THREAD_LIMIT;
+    for (ui32 startIdx = 0, blockIdx = 0; startIdx < documentCount; startIdx += documentBlockSize, ++blockIdx) {
+        NPar::TLocalExecutor::TExecRangeParams blockParams(startIdx, startIdx + Min(documentBlockSize, documentCount - startIdx));
+        auto quantizedFeaturesBlock = quantizedFeatures[blockIdx];
+        auto& indexesForBlock = indexes[blockIdx];
+        localExecutor->ExecRange([&](ui32 documentIdx) {
+            const size_t documentIdxInBlock = documentIdx - startIdx;
+            auto docIndexes = MakeArrayRef(indexesForBlock.data() + forest.GetTreeCount() * documentIdxInBlock, forest.GetTreeCount());
+            CalcShapValuesForDocumentMulti(
+                model,
+                *preparedTrees,
+                quantizedFeaturesBlock.Get(),
+                fixedFeatureParams,
+                featuresCount,
+                docIndexes,
+                documentIdxInBlock,
+                &shapValues[documentIdx]
+            );
+        }, blockParams, NPar::TLocalExecutor::WAIT_COMPLETE);
+    }
+
+    const auto& rebasingShapValues = SwapFeatureAndDocumentAxes(shapValues);
+    return rebasingShapValues;
 }
 
 static void OutputShapValuesMulti(const TVector<TVector<TVector<double>>>& shapValues, TFileOutput& out) {
@@ -1332,7 +1516,15 @@ void CalcAndOutputShapValues(
         &dataset,
         mode,
         localExecutor,
-        /*calcInternalValues=*/false
+        /*calcInternalValues*/ false
+    );
+    CalcShapValuesByLeaf(
+        model,
+        /*fixedFeatureParams*/ Nothing(),
+        logPeriod,
+        preparedTrees.CalcInternalValues,
+        localExecutor,
+        &preparedTrees
     );
 
     CB_ENSURE_SCALE_IDENTITY(model.GetScaleAndBias(), "SHAP values");
@@ -1363,6 +1555,7 @@ void CalcAndOutputShapValues(
             *featuresBlockIterator,
             flatFeatureCount,
             preparedTrees,
+            /*fixedFeatureParams*/ Nothing(),
             start,
             end,
             localExecutor,
