@@ -7,9 +7,10 @@ SRCS(
     compare_documents.cpp
     feature_str.cpp
     output_fstr.cpp
-    shap_values.cpp
     shap_exact.cpp
     shap_interaction_values.cpp
+    shap_values.cpp
+    shap_prepared_trees.cpp
     util.cpp
 )
 
