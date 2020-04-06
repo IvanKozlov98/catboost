@@ -53,6 +53,8 @@ void CalcShapValuesForDocumentMulti(
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int flatFeatureCount,
     TConstArrayRef<NCB::NModelEvaluation::TCalcerIndexType> docIndices,
+    ECalcTypeShapValues calcType,
+    size_t documentIdxInBlock,
     size_t documentIdx,
     TVector<TVector<double>>* shapValues
 );
@@ -70,6 +72,7 @@ void CalcShapValuesForDocumentMulti(
 void CalcShapValuesByLeaf(
     const TFullModel& model,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    ECalcTypeShapValues calcType,
     int logPeriod,
     bool calcInternalValues,
     NPar::TLocalExecutor* localExecutor,
@@ -80,9 +83,12 @@ void CalcShapValuesByLeaf(
 TVector<TVector<TVector<double>>> CalcShapValuesMulti(
     const TFullModel& model,
     const NCB::TDataProvider& dataset,
+    const NCB::TDataProviderPtr referenceDataset, // can be nullptr if using Independent Tree SHAP algorithm
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
+    ECalcTypeShapValues calcType,
+    EModelOutputType modelOutputType,
     NPar::TLocalExecutor* localExecutor
 );
 
@@ -90,9 +96,12 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
 TVector<TVector<double>> CalcShapValues(
     const TFullModel& model,
     const NCB::TDataProvider& dataset,
+    const NCB::TDataProviderPtr referenceDataset, // can be nullptr if using Independent Tree SHAP algorithm
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
+    ECalcTypeShapValues calcType,
+    EModelOutputType modelOutputType,
     NPar::TLocalExecutor* localExecutor
 );
 

@@ -381,6 +381,12 @@ cdef extern from "catboost/private/libs/options/enums.h":
     cdef cppclass EFstrType:
         pass
 
+    cdef cppclass EModelOutputType:
+        pass
+
+    cdef cppclass ECalcTypeShapValues:
+        pass
+
     cdef cppclass EPreCalcShapValues:
         pass
 
@@ -1283,8 +1289,11 @@ cdef extern from "catboost/libs/fstr/calc_fstr.h":
         const EFstrType type,
         const TFullModel& model,
         const TDataProviderPtr dataset,
+        const TDataProviderPtr referenceDataset,
+        ECalcTypeShapValues calcType,
         int threadCount,
         EPreCalcShapValues mode,
+        EModelOutputType modelOutputType,
         int logPeriod
     ) nogil except +ProcessException
 
@@ -1292,8 +1301,11 @@ cdef extern from "catboost/libs/fstr/calc_fstr.h":
         const EFstrType type,
         const TFullModel& model,
         const TDataProviderPtr dataset,
+        const TDataProviderPtr referenceDataset,
+        ECalcTypeShapValues calcType,
         int threadCount,
         EPreCalcShapValues mode,
+        EModelOutputType modelOutputType,
         int logPeriod
     ) nogil except +ProcessException
 
@@ -1879,6 +1891,13 @@ cdef EPreCalcShapValues string_to_shap_mode(shap_mode_str) except *:
     if not TryFromString[EPreCalcShapValues](to_arcadia_string(shap_mode_str), shap_mode):
         raise CatBoostError("Unknown shap values mode {}.".format(shap_mode_str))
     return shap_mode
+
+
+cdef EModelOutputType string_to_model_output(model_output_str) except *:
+    cdef EModelOutputType model_output
+    if not TryFromString[EModelOutputType](to_arcadia_string(model_output_str), model_output):
+        raise CatBoostError("Unknown shap values mode {}.".format(model_output_str))
+    return model_output
 
 
 cdef class _PreprocessParams:
@@ -4371,7 +4390,7 @@ cdef class _CatBoost:
     cpdef _get_loss_function_name(self):
         return self.__model.GetLossFunctionName()
 
-    cpdef _calc_fstr(self, type_name, _PoolBase pool, int thread_count, int verbose, shap_mode_name, interaction_indices):
+    cpdef _calc_fstr(self, type_name, _PoolBase pool, _PoolBase reference_data, int thread_count, int verbose, model_output_name, shap_mode_name, interaction_indices):
         thread_count = UpdateThreadCount(thread_count);
         cdef TVector[TString] feature_ids = GetMaybeGeneratedModelFeatureIds(
             dereference(self.__model),
@@ -4385,8 +4404,16 @@ cdef class _CatBoost:
         if pool:
             dataProviderPtr = pool.__pool
 
+        cdef ECalcTypeShapValues calc_type_shap_values
+        TryFromString[ECalcTypeShapValues](to_arcadia_string("TreeSHAP"), calc_type_shap_values)
+        cdef TDataProviderPtr referenceDataProviderPtr
+        if reference_data:
+            referenceDataProviderPtr = reference_data.__pool
+            TryFromString[ECalcTypeShapValues](to_arcadia_string("IndependentTreeSHAP"), calc_type_shap_values)
+
         cdef EFstrType fstr_type = string_to_fstr_type(type_name)
         cdef EPreCalcShapValues shap_mode = string_to_shap_mode(shap_mode_name)
+        cdef EModelOutputType model_output = string_to_model_output(model_output_name)
         cdef TMaybe[pair[int, int]] pair_of_features
 
         if type_name == 'ShapValues' and dereference(self.__model).GetDimensionsCount() > 1:
@@ -4395,8 +4422,11 @@ cdef class _CatBoost:
                     fstr_type,
                     dereference(self.__model),
                     dataProviderPtr,
+                    referenceDataProviderPtr,
+                    calc_type_shap_values,
                     thread_count,
                     shap_mode,
+                    model_output,
                     verbose
                 )
             return _3d_vector_of_double_to_np_array(fstr_multi), native_feature_ids
@@ -4423,8 +4453,11 @@ cdef class _CatBoost:
                     fstr_type,
                     dereference(self.__model),
                     dataProviderPtr,
+                    referenceDataProviderPtr,
+                    calc_type_shap_values,
                     thread_count,
                     shap_mode,
+                    model_output,
                     verbose
                 )
             return _2d_vector_of_double_to_np_array(fstr), native_feature_ids
