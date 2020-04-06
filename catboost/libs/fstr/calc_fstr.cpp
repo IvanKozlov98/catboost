@@ -271,11 +271,11 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
     TRestorableFastRng64 rand(0);
     auto targetData = CreateModelCompatibleProcessedDataProvider(dataset, {metricDescription}, model, GetMonopolisticFreeCpuRam(), &rand, localExecutor).TargetData;
     CB_ENSURE(targetData->GetTargetDimension() <= 1, "Multi-dimensional target fstr is unimplemented yet");
-
-    TShapPreparedTrees preparedTrees = PrepareTrees(model, &dataset, EPreCalcShapValues::Auto, localExecutor, true);
+    TShapPreparedTrees preparedTrees = PrepareTrees(model, &dataset, /*referenceDataset*/ nullptr, EPreCalcShapValues::Auto, ECalcTypeShapValues::TreeSHAP, EModelOutputType::Raw, localExecutor, true);
     CalcShapValuesByLeaf(
         model,
         /*fixedFeatureParams*/ Nothing(),
+        /*calcType*/ ECalcTypeShapValues::TreeSHAP,
         /*logPeriod*/ 0,
         preparedTrees.CalcInternalValues,
         localExecutor,
@@ -680,8 +680,11 @@ TVector<TVector<double>> GetFeatureImportances(
     const EFstrType fstrType,
     const TFullModel& model,
     const TDataProviderPtr dataset, // can be nullptr
+    const TDataProviderPtr referenceDataset, // can be nullptr
+    ECalcTypeShapValues calcType,
     int threadCount,
     EPreCalcShapValues mode,
+    EModelOutputType modelOutputType,
     int logPeriod)
 {
     TSetLoggingVerboseOrSilent inThisScope(logPeriod);
@@ -712,7 +715,7 @@ TVector<TVector<double>> GetFeatureImportances(
             NPar::TLocalExecutor localExecutor;
             localExecutor.RunAdditionalThreads(threadCount - 1);
 
-            return CalcShapValues(model, *dataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor);
+            return CalcShapValues(model, *dataset, referenceDataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, calcType, modelOutputType, &localExecutor);
         }
         case EFstrType::PredictionDiff: {
             NPar::TLocalExecutor localExecutor;
@@ -730,8 +733,11 @@ TVector<TVector<TVector<double>>> GetFeatureImportancesMulti(
     const EFstrType fstrType,
     const TFullModel& model,
     const TDataProviderPtr dataset,
+    const TDataProviderPtr referenceDataset, // can be nullptr
+    ECalcTypeShapValues calcType,
     int threadCount,
     EPreCalcShapValues mode,
+    EModelOutputType modelOutputType,
     int logPeriod)
 {
     TSetLoggingVerboseOrSilent inThisScope(logPeriod);
@@ -745,7 +751,7 @@ TVector<TVector<TVector<double>>> GetFeatureImportancesMulti(
     NPar::TLocalExecutor localExecutor;
     localExecutor.RunAdditionalThreads(threadCount - 1);
 
-    return CalcShapValuesMulti(model, *dataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor);
+    return CalcShapValuesMulti(model, *dataset, referenceDataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, calcType, modelOutputType, &localExecutor);
 }
 
 TVector<TVector<TVector<TVector<double>>>> CalcShapFeatureInteractionMulti(
