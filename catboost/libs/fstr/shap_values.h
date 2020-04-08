@@ -70,6 +70,7 @@ struct TShapPreparedTrees {
     bool CalcInternalValues;
     TVector<double> LeafWeightsForAllTrees;
     TVector<TVector<TVector<double>>> SubtreeWeightsForAllTrees;
+    TVector<TVector<bool>> CalcShapValuesWithFixedFeaturesForAllTrees;
 
 public:
     TShapPreparedTrees() = default;
@@ -129,6 +130,7 @@ TShapPreparedTrees PrepareTrees(
 void CalcShapValuesByLeaf(
     const TFullModel& model,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     int logPeriod,
     bool calcInternalValues,
     NPar::TLocalExecutor* localExecutor,
@@ -161,6 +163,7 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
     const TVector<TIntrusivePtr<NCB::NModelEvaluation::IQuantizedData>>& quantizedFeatures,
     const TVector<TVector<NCB::NModelEvaluation::TCalcerIndexType>>& indexes,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     const size_t documentCount,
     int logPeriod,
     TShapPreparedTrees* preparedTrees,

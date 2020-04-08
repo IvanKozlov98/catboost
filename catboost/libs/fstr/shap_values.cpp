@@ -834,6 +834,7 @@ void CalcShapValuesForDocumentMulti(
     const TShapPreparedTrees& preparedTrees,
     const NCB::NModelEvaluation::IQuantizedData* binarizedFeaturesForBlock,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     int featuresCount,
     TConstArrayRef<NModelEvaluation::TCalcerIndexType> docIndices,
     size_t documentIdxInBlock,
@@ -843,6 +844,9 @@ void CalcShapValuesForDocumentMulti(
     shapValues->assign(approxDimension, TVector<double>(featuresCount + 1, 0.0));
     const size_t treeCount = model.GetTreeCount();
     for (size_t treeIdx = 0; treeIdx < treeCount; ++treeIdx) {
+        if (!calcShapValuesWithFixedFeatureForAllTrees[treeIdx]) {
+            continue;
+        }
         if (preparedTrees.CalcShapValuesByLeafForAllTrees && model.IsOblivious()) {
             Y_ASSERT(docIndices[treeIdx] < preparedTrees.ShapValuesByLeafForAllTrees[treeIdx].size());
             for (const TShapValue& shapValue : preparedTrees.ShapValuesByLeafForAllTrees[treeIdx][docIndices[treeIdx]]) {
@@ -916,6 +920,7 @@ void CalcShapValuesForDocumentMulti(
         preparedTrees,
         binarizedFeaturesForBlock,
         /*fixedFeatureParams*/ Nothing(),
+        /*calcShapValuesWithFixedFeatureForAllTrees*/ TVector<bool>(model.GetTreeCount(), true),
         featuresCount,
         docIndices,
         documentIdxInBlock,
@@ -929,6 +934,7 @@ static void CalcShapValuesForDocumentBlockMulti(
     int flatFeatureCount,
     const TShapPreparedTrees& preparedTrees,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     size_t start,
     size_t end,
     NPar::TLocalExecutor* localExecutor,
@@ -955,6 +961,7 @@ static void CalcShapValuesForDocumentBlockMulti(
             preparedTrees,
             binarizedFeaturesForBlock.Get(),
             fixedFeatureParams,
+            calcShapValuesWithFixedFeatureForAllTrees,
             flatFeatureCount,
             MakeArrayRef(indices.data() + documentIdxInBlock * model.GetTreeCount(), model.GetTreeCount()),
             documentIdxInBlock,
@@ -978,6 +985,7 @@ static void CalcShapValuesByLeafForTreeBlock(
     int end,
     bool calcInternalValues,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     NPar::TLocalExecutor* localExecutor,
     TShapPreparedTrees* preparedTrees
 ) {
@@ -987,7 +995,8 @@ static void CalcShapValuesByLeafForTreeBlock(
     NPar::TLocalExecutor::TExecRangeParams blockParams(start, end);
     localExecutor->ExecRange([&] (size_t treeIdx) {
         const bool isOblivious = forest.GetNonSymmetricStepNodes().empty() && forest.GetNonSymmetricNodeIdToLeafId().empty();
-        if (preparedTrees->CalcShapValuesByLeafForAllTrees && isOblivious) {
+        if (preparedTrees->CalcShapValuesByLeafForAllTrees && isOblivious &&
+            calcShapValuesWithFixedFeatureForAllTrees[treeIdx]) {
             const size_t leafCount = (size_t(1) << forest.GetTreeSizes()[treeIdx]);
             TVector<TVector<TShapValue>>& shapValuesByLeaf = preparedTrees->ShapValuesByLeafForAllTrees[treeIdx];
             shapValuesByLeaf.resize(leafCount);
@@ -1098,6 +1107,24 @@ static void CalcTreeStats(
     }
 }
 
+static void InitCalcShapValuesWithFixedFeaturesForAllTrees(
+    const TModelTrees& forest,
+    const TVector<int> binFeatureCombinationClass,
+    TVector<TVector<bool>>* calcShapValuesWithFixedFeaturesForAllTrees
+) {
+    const size_t treeCount = forest.GetTreeCount();
+    for (size_t treeIdx = 0; treeIdx < treeCount; ++treeIdx) {
+        const size_t depthOfTree = forest.GetTreeSizes()[treeIdx];
+        for (size_t depth = 0; depth < depthOfTree; ++depth) {
+			const size_t remainingDepth = depthOfTree - depth - 1;
+            const int combinationClass = binFeatureCombinationClass[
+                forest.GetTreeSplits()[forest.GetTreeStartOffsets()[treeIdx] + remainingDepth]
+            ];
+            (*calcShapValuesWithFixedFeaturesForAllTrees)[combinationClass][treeIdx] = true;
+        }
+    }
+}
+
 static void InitPreparedTrees(
     const TFullModel& model,
     const TDataProvider* dataset, // can be nullptr if model has LeafWeights
@@ -1139,6 +1166,13 @@ static void InitPreparedTrees(
         &preparedTrees->BinFeatureCombinationClass,
         &preparedTrees->CombinationClassFeatures
     );
+    const int featureCount = preparedTrees->CombinationClassFeatures.size();
+    preparedTrees->CalcShapValuesWithFixedFeaturesForAllTrees.assign(featureCount, TVector<bool>(treeCount, false));
+    InitCalcShapValuesWithFixedFeaturesForAllTrees(
+        forest,
+        preparedTrees->BinFeatureCombinationClass,
+        &preparedTrees->CalcShapValuesWithFixedFeaturesForAllTrees
+    );
 }
 
 static void InitLeafWeights(
@@ -1178,6 +1212,7 @@ static inline bool IsMultiClassification(const TFullModel& model) {
 void CalcShapValuesByLeaf(
     const TFullModel& model,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     int logPeriod,
     bool calcInternalValues,
     NPar::TLocalExecutor* localExecutor,
@@ -1199,6 +1234,7 @@ void CalcShapValuesByLeaf(
             end,
             calcInternalValues,
             fixedFeatureParams,
+            calcShapValuesWithFixedFeatureForAllTrees,
             localExecutor,
             preparedTrees
         );
@@ -1237,6 +1273,7 @@ TShapPreparedTrees PrepareTrees(
     CalcShapValuesByLeaf(
         model,
         /*fixedFeatureParams*/ Nothing(),
+        /*calcShapValuesWithFixedFeatureForAllTrees*/ TVector<bool>(model.GetTreeCount(), true),
         /*logPeriod*/ 0,
         preparedTrees.CalcInternalValues,
         localExecutor,
@@ -1345,6 +1382,7 @@ static TVector<TVector<TVector<double>>> CalcShapValuesWithPreparedTrees(
     const TFullModel& model,
     const TDataProvider& dataset,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     int logPeriod,
     TShapPreparedTrees* preparedTrees,
     NPar::TLocalExecutor* localExecutor
@@ -1377,6 +1415,7 @@ static TVector<TVector<TVector<double>>> CalcShapValuesWithPreparedTrees(
             flatFeatureCount,
             *preparedTrees,
             fixedFeatureParams,
+            calcShapValuesWithFixedFeatureForAllTrees,
             start,
             end,
             localExecutor,
@@ -1406,9 +1445,13 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
         localExecutor,
         /*calcInternalValues*/ false
     );
+    TVector<bool> calcShapValuesWithFixedFeatureForAllTrees = fixedFeatureParams.Defined() ?
+        preparedTrees.CalcShapValuesWithFixedFeaturesForAllTrees[fixedFeatureParams->Feature] :
+        TVector<bool>(model.GetTreeCount(), true);
     CalcShapValuesByLeaf(
         model,
         fixedFeatureParams,
+        calcShapValuesWithFixedFeatureForAllTrees,
         logPeriod,
         preparedTrees.CalcInternalValues,
         localExecutor,
@@ -1419,6 +1462,7 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
         model,
         dataset,
         fixedFeatureParams,
+        calcShapValuesWithFixedFeatureForAllTrees,
         logPeriod,
         &preparedTrees,
         localExecutor
@@ -1475,6 +1519,7 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
     const TVector<TIntrusivePtr<NModelEvaluation::IQuantizedData>>& quantizedFeatures,
     const TVector<TVector<NModelEvaluation::TCalcerIndexType>>& indices,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
+    const TVector<bool>& calcShapValuesWithFixedFeatureForAllTrees,
     const size_t documentCount,
     int logPeriod,
     TShapPreparedTrees* preparedTrees,
@@ -1483,6 +1528,7 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
     CalcShapValuesByLeaf(
         model,
         fixedFeatureParams,
+        calcShapValuesWithFixedFeatureForAllTrees,
         logPeriod,
         preparedTrees->CalcInternalValues,
         localExecutor,
@@ -1504,6 +1550,7 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
                 *preparedTrees,
                 quantizedFeaturesBlock.Get(),
                 fixedFeatureParams,
+                calcShapValuesWithFixedFeatureForAllTrees,
                 featuresCount,
                 docIndices,
                 documentIdxInBlock,
@@ -1542,9 +1589,11 @@ void CalcAndOutputShapValues(
         localExecutor,
         /*calcInternalValues*/ false
     );
+    TVector<bool> calcShapValuesWithFixedFeatureForAllTrees(model.GetTreeCount(), true);
     CalcShapValuesByLeaf(
         model,
         /*fixedFeatureParams*/ Nothing(),
+        calcShapValuesWithFixedFeatureForAllTrees,
         logPeriod,
         preparedTrees.CalcInternalValues,
         localExecutor,
@@ -1580,6 +1629,7 @@ void CalcAndOutputShapValues(
             flatFeatureCount,
             preparedTrees,
             /*fixedFeatureParams*/ Nothing(),
+            calcShapValuesWithFixedFeatureForAllTrees,
             start,
             end,
             localExecutor,
