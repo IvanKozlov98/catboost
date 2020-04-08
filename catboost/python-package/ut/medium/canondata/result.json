@@ -946,11 +946,11 @@
         "uri": "file://test.test_shap_feature_importance_with_langevin/feature_importance.npy"
     },
     "test.test_shap_interaction_feature_importance[CPU]": {
-        "checksum": "4d6c069deb1a5ce898969a4b3515f189",
+        "checksum": "9ff81946c50569292ccfd701e766c96a",
         "uri": "file://test.test_shap_interaction_feature_importance_CPU_/feature_importance.npy"
     },
     "test.test_shap_interaction_feature_importance_multiclass[CPU]": {
-        "checksum": "c1c53f6fc7f5b77ff39b60b098b5a068",
+        "checksum": "7d53db720079c78deb5c5ee40e423948",
         "uri": "file://test.test_shap_interaction_feature_importance_multiclass_CPU_/feature_importance.npy"
     },
     "test.test_shap_multiclass[CPU]": {
