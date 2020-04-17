@@ -1,5 +1,6 @@
 #include "shap_values.h"
 
+#include "independent_tree_shap.h"
 #include "util.h"
 
 #include <catboost/private/libs/algo/features_data_helpers.h>
@@ -736,7 +737,6 @@ void CalcShapValuesForDocumentMulti(
             IndependentTreeShap(
                 model,
                 preparedTrees,
-                featuresCount,
                 docIndices,
                 documentIdx,
                 shapValues
