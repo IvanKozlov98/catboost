@@ -6,9 +6,11 @@ SRCS(
     calc_fstr.cpp
     compare_documents.cpp
     feature_str.cpp
+    independent_tree_shap.cpp
     output_fstr.cpp
-    shap_values.cpp
     shap_interaction_values.cpp
+    shap_values.cpp
+    shap_prepared_trees.cpp
     util.cpp
 )
 

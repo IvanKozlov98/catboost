@@ -3032,11 +3032,21 @@ def test_interaction_feature_importance(task_type):
     return local_canonical_file(fimp_npy_path)
 
 
-def test_shap_feature_importance(task_type):
+def make_reference_data(pool, calc_shap_mode):
+    reference_data = None
+    if calc_shap_mode == "IndependentTreeSHAP":
+        quarter_size = pool.num_row() / 4
+        reference_data = pool.slice(list(range(quarter_size)))
+    return reference_data
+
+
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_feature_importance(task_type, calc_shap_mode):
     pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, calc_shap_mode)
     model = CatBoostClassifier(iterations=5, learning_rate=0.03, max_ctr_complexity=1, task_type=task_type, devices='0')
     model.fit(pool)
-    shaps = model.get_feature_importance(type=EFstrType.ShapValues, data=pool)
+    shaps = model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data)
     assert np.allclose(model.predict(pool, prediction_type='RawFormulaVal'), np.sum(shaps, axis=1))
 
     fimp_npy_path = test_output_path(FIMP_NPY_PATH)
@@ -3044,12 +3054,14 @@ def test_shap_feature_importance(task_type):
     return local_canonical_file(fimp_npy_path)
 
 
-def test_shap_feature_importance_multiclass(task_type):
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_feature_importance_multiclass(task_type, calc_shap_mode):
     pool = Pool(AIRLINES_5K_TRAIN_FILE, column_description=AIRLINES_5K_CD_FILE, has_header=True)
+    reference_data = make_reference_data(pool, calc_shap_mode)
     model = CatBoostClassifier(iterations=5, learning_rate=0.03, task_type=task_type, devices='0', loss_function='MultiClass')
     model.fit(pool)
     fimp_npy_path = test_output_path(FIMP_NPY_PATH)
-    np.save(fimp_npy_path, np.around(np.array(model.get_feature_importance(type=EFstrType.ShapValues, data=pool)), 9))
+    np.save(fimp_npy_path, np.around(np.array(model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data)), 9))
     return local_canonical_file(fimp_npy_path)
 
 
@@ -3091,11 +3103,13 @@ def test_shap_feature_importance_asymmetric_and_symmetric(task_type):
     assert np.all(shap_symm - shap_asymm < 1e-8)
 
 
-def test_shap_feature_importance_with_langevin():
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_feature_importance_with_langevin(calc_shap_mode):
     pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, calc_shap_mode)
     model = CatBoostClassifier(iterations=5, learning_rate=0.03, depth=10, langevin=True, diffusion_temperature=1000)
     model.fit(pool)
-    shaps = model.get_feature_importance(type=EFstrType.ShapValues, data=pool)
+    shaps = model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data)
     assert np.allclose(model.predict(pool, prediction_type='RawFormulaVal'), np.sum(shaps, axis=1))
 
     fimp_npy_path = test_output_path(FIMP_NPY_PATH)
@@ -3150,16 +3164,60 @@ def test_loss_function_change_asymmetric(task_type, grow_policy):
     return local_canonical_file(fimp_npy_path)
 
 
-def test_shap_feature_importance_modes(task_type):
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_feature_importance_modes(task_type, calc_shap_mode):
     pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, calc_shap_mode)
     model = CatBoostClassifier(iterations=5, task_type=task_type)
     model.fit(pool)
     modes = ["Auto", "UsePreCalc", "NoPreCalc"]
     shaps_for_modes = []
     for mode in modes:
-        shaps_for_modes.append(model.get_feature_importance(type=EFstrType.ShapValues, data=pool, shap_mode=mode))
+        shaps_for_modes.append(model.get_feature_importance(type=EFstrType.ShapValues, data=pool, shap_mode=mode, reference_data=reference_data))
     for i in range(len(modes) - 1):
         assert np.all(np.abs(shaps_for_modes[i] - shaps_for_modes[i - 1]) < 1e-9)
+
+
+def test_shap_feature_probability(task_type):
+    pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, "IndependentTreeSHAP")
+    model = CatBoostClassifier(iterations=50, task_type=task_type)
+    model.fit(pool)
+    shap_values = model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data, model_output="Probability")
+    predictions = model.predict(pool, "Probability")
+    for doc_idx in range(len(shap_values)):
+        assert abs(sum(shap_values[doc_idx]) - predictions[doc_idx][1]) < 1e-6
+
+
+def test_shap_feature_log_loss(task_type):
+    def log_loss(yt, yp):
+        return (-(yt * np.log(yp) + (1 - yt) * np.log(1 - yp)))
+
+    pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, "IndependentTreeSHAP")
+    model = CatBoostClassifier(iterations=50, loss_function='Logloss', task_type=task_type)
+    model.fit(pool)
+    label = pool.get_label()
+    shap_values = model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data, model_output="LossFunction")
+    predictions = model.predict(pool, "Probability")
+    for doc_idx in range(len(shap_values)):
+        assert abs(sum(shap_values[doc_idx]) - log_loss(float(label[doc_idx]), float(predictions[doc_idx][1]))) < 1e-6
+
+
+def test_shap_feature_rmse(task_type):
+    def rmse(yt, yp):
+        return np.absolute(yt - yp)
+
+    train_pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    test_pool = Pool(TEST_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(train_pool, "IndependentTreeSHAP")
+    model = CatBoostRegressor(iterations=10, loss_function='RMSE')
+    model.fit(train_pool)
+    label = test_pool.get_label()
+    shap_values = model.get_feature_importance(type=EFstrType.ShapValues, data=test_pool, reference_data=reference_data, model_output="LossFunction")
+    predictions = model.predict(test_pool)
+    for doc_idx in range(len(shap_values)):
+        assert abs(sum(shap_values[doc_idx]) - rmse(float(label[doc_idx]), float(predictions[doc_idx]))) < 1e-6
 
 
 def test_prediction_diff_feature_importance():
@@ -3396,10 +3454,12 @@ def test_shap(task_type):
     return local_canonical_file(fimp_txt_path)
 
 
-def test_shap_complex_ctr(task_type):
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_complex_ctr(task_type, calc_shap_mode):
     pool = Pool([[0, 0, 0], [0, 1, 0], [1, 0, 1], [1, 1, 2]], [0, 0, 5, 8], cat_features=[0, 1, 2])
+    reference_data = make_reference_data(pool, calc_shap_mode)
     model = train(pool, {'random_seed': 12302113, 'iterations': 100, 'task_type': task_type, 'devices': '0'})
-    shap_values = model.get_feature_importance(type=EFstrType.ShapValues, data=pool)
+    shap_values = model.get_feature_importance(type=EFstrType.ShapValues, data=pool, reference_data=reference_data)
     predictions = model.predict(pool)
     assert(len(predictions) == len(shap_values))
     for pred_idx in range(len(predictions)):
@@ -4129,16 +4189,21 @@ def test_model_and_pool_compatibility():
         model.get_feature_importance(type=EFstrType.ShapValues, data=pool2)
 
 
-def test_shap_verbose():
+@pytest.mark.parametrize('calc_shap_mode', ['TreeSHAP', 'IndependentTreeSHAP'])
+def test_shap_verbose(calc_shap_mode):
     pool = Pool(TRAIN_FILE, column_description=CD_FILE)
+    reference_data = make_reference_data(pool, calc_shap_mode)
 
     model = CatBoost(dict(iterations=250))
     model.fit(pool)
 
     tmpfile = test_output_path('test_data_dumps')
     with LogStdout(open(tmpfile, 'w')):
-        model.get_feature_importance(type=EFstrType.ShapValues, data=pool, verbose=12)
-    assert(_count_lines(tmpfile) == 5)
+        model.get_feature_importance(type=EFstrType.ShapValues, data=pool, verbose=12, reference_data=reference_data)
+    if calc_shap_mode == "TreeSHAP":
+        assert(_count_lines(tmpfile) == 5)
+    else:
+        assert(_count_lines(tmpfile) == 6)
 
 
 def test_eval_set_with_nans(task_type):

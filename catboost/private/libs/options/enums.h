@@ -248,6 +248,18 @@ enum class EPreCalcShapValues {
     NoPreCalc
 };
 
+enum class ECalcTypeShapValues {
+    TreeSHAP,
+    IndependentTreeSHAP,
+    Approximate
+};
+
+enum class EModelOutputType {
+    Raw,
+    Probability,
+    LossFunction
+};
+
 enum class EObservationsToBootstrap {
     LearnAndTest,
     TestOnly

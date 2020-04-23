@@ -15,7 +15,7 @@ using namespace NCB;
 
 
 TVector<double> CollectLeavesStatistics(
-    const NCB::TDataProvider& dataset,
+    const TDataProvider& dataset,
     const TFullModel& model,
     NPar::TLocalExecutor* localExecutor) {
 
@@ -89,6 +89,17 @@ bool TryGetLossDescription(const TFullModel& model, NCatboostOptions::TLossDescr
         lossDescription.Load(ReadTJsonValue(model.ModelInfo.at("params"))["loss_function"]);
     }
     return true;
+}
+
+bool TryGetObjectiveMetric(const TFullModel& model, NCatboostOptions::TLossDescription& lossDescription) {
+    if (model.ModelInfo.contains("params")) {
+        const auto &params = ReadTJsonValue(model.ModelInfo.at("params"));
+        if (params.Has("metrics") && params["metrics"].Has("objective_metric")) {
+            lossDescription.Load(params["metrics"]["objective_metric"]);
+            return true;
+        }
+    }
+    return TryGetLossDescription(model, lossDescription);
 }
 
 void CheckNonZeroApproxForZeroWeightLeaf(const TFullModel& model) {

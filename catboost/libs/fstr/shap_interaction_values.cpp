@@ -552,7 +552,10 @@ TInteractionValuesFull CalcShapInteractionValuesMulti(
     TShapPreparedTrees preparedTrees = PrepareTrees(
         model,
         &dataset,
+        /*referenceDataset*/ nullptr,
         mode,
+        /*calcType*/ ECalcTypeShapValues::TreeSHAP,
+        /*modelOutputType*/ EModelOutputType::Raw,
         localExecutor,
         /*calcInternalValues*/ true
     );
