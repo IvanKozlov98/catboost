@@ -303,6 +303,7 @@ static void CalcInternalShapInteractionValuesMulti(
         binarizedFeatures,
         indexes,
         /*fixedFeatureParams*/ Nothing(),
+        /*calcShapValuesWithFixedFeatureForAllTrees*/ TVector<bool>(model.GetTreeCount(), true),
         documentCount,
         logPeriod,
         preparedTrees,
@@ -327,11 +328,13 @@ static void CalcInternalShapInteractionValuesMulti(
     // characterizations of probabilistic and cardinal-probabilistic interaction indices.
     // Games and Economic Behavior 55, 1 (2006), 72–99
     for (size_t classIdx1 : classIndicesFirst) {
+        const auto& calcShapValuesWithFixedFeatureForAllTrees = preparedTrees->CalcShapValuesWithFixedFeaturesForAllTrees[classIdx1];
         const auto& contribsOn = CalcShapValueWithQuantizedData(
             model,
             binarizedFeatures,
             indexes,
             MakeMaybe<TFixedFeatureParams>(classIdx1, TFixedFeatureParams::EMode::FixedOn),
+            calcShapValuesWithFixedFeatureForAllTrees,
             documentCount,
             logPeriod,
             preparedTrees,
@@ -343,6 +346,7 @@ static void CalcInternalShapInteractionValuesMulti(
             binarizedFeatures,
             indexes,
             MakeMaybe<TFixedFeatureParams>(classIdx1, TFixedFeatureParams::EMode::FixedOff),
+            calcShapValuesWithFixedFeatureForAllTrees,
             documentCount,
             logPeriod,
             preparedTrees,

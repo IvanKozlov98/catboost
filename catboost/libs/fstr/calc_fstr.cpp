@@ -292,6 +292,7 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
     CalcShapValuesByLeaf(
         model,
         /*fixedFeatureParams*/ Nothing(),
+        /*calcShapValuesWithFixedFeatureForAllTrees*/ TVector<bool>(model.GetTreeCount(), true),
         /*logPeriod*/ 0,
         preparedTrees.CalcInternalValues,
         localExecutor,
