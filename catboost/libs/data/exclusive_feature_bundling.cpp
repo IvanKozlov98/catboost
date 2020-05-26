@@ -9,7 +9,7 @@
 #include <catboost/libs/helpers/parallel_tasks.h>
 
 #include <library/cpp/pop_count/popcount.h>
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/generic/algorithm.h>
 #include <util/generic/array_ref.h>
@@ -126,7 +126,11 @@ namespace NCB {
 
             // because 0 bin is common for all features in the bundle
             const ui32 binCountInBundleNeeded = featureBinCount - 1;
-
+            if (options.OnlyOneHotsAndBinaryFloats) {
+                if (featureBinCount > 2) {
+                    continue;
+                }
+            }
             if (binCountInBundleNeeded >= options.MaxBuckets) {
                 continue;
             }

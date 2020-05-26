@@ -5,8 +5,8 @@
 #include "exception.h"
 #include "maybe_owning_array_holder.h"
 
-#include <library/binsaver/bin_saver.h>
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/binsaver/bin_saver.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/system/defaults.h>
 #include <util/system/types.h>
@@ -165,7 +165,7 @@ public:
         );
 #endif
         static_assert(
-            (sizeof(T) == sizeof(ui64)) || (alignof(ui64) == sizeof(ui64)),
+            !(alignof(ui64) % alignof(T)),
             "Can't interpret TCompressedArray's data as raw array because of alignment"
         );
         CB_ENSURE(

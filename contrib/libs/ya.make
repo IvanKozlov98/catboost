@@ -6,7 +6,7 @@ RECURSE(
     brotli
     clapack
     coreml
-    cppdemangle/all
+    cppdemangle
     crcutil
     cxxsupp/libcxx
     cxxsupp/libcxx-filesystem
@@ -37,6 +37,7 @@ RECURSE(
     pugixml
     python
     python/ut
+    r-lang
     re2
     snappy
     sqlite3
@@ -82,12 +83,6 @@ ELSE()
 ENDIF()
 
 IF (OS_LINUX OR OS_WINDOWS)
-    RECURSE(
-    
-)
-ENDIF()
-
-IF (OS_IOS)
     RECURSE(
     
 )

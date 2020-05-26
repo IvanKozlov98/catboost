@@ -2,7 +2,7 @@
 
 #include "pair.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 #include <util/string/builder.h>
 #include <util/generic/vector.h>
@@ -130,7 +130,7 @@ void TSockTest::TestBrokenPipe() {
 void TSockTest::TestClose() {
     SOCKET socks[2];
 
-    UNIT_ASSERT_EQUAL(SocketPair(socks), 0)
+    UNIT_ASSERT_EQUAL(SocketPair(socks), 0);
     TSocket receiver(socks[1]);
 
     UNIT_ASSERT_EQUAL(static_cast<SOCKET>(receiver), socks[1]);

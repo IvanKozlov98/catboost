@@ -3,7 +3,7 @@
 #include <catboost/libs/data/data_provider.h>
 #include <catboost/libs/model/model.h>
 #include <catboost/private/libs/options/enums.h>
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/generic/vector.h>
 #include <util/stream/input.h>
@@ -71,6 +71,7 @@ struct TShapPreparedTrees {
     TVector<double> LeafWeightsForAllTrees;
     TVector<TVector<TVector<double>>> SubtreeWeightsForAllTrees;
     TVector<TVector<bool>> CalcShapValuesWithFixedFeaturesForAllTrees;
+    TVector<TVector<TVector<TVector<double>>>> SubtreeValuesForAllTrees;
 
 public:
     TShapPreparedTrees() = default;
@@ -93,7 +94,8 @@ public:
         CalcShapValuesByLeafForAllTrees,
         CalcInternalValues,
         LeafWeightsForAllTrees,
-        SubtreeWeightsForAllTrees
+        SubtreeWeightsForAllTrees,
+        SubtreeValuesForAllTrees
     );
 };
 
@@ -105,7 +107,8 @@ void CalcShapValuesForDocumentMulti(
     int flatFeatureCount,
     TConstArrayRef<NCB::NModelEvaluation::TCalcerIndexType> docIndices,
     size_t documentIdx,
-    TVector<TVector<double>>* shapValues
+    TVector<TVector<double>>* shapValues,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 void CalcShapValuesForDocumentMulti(
@@ -115,16 +118,23 @@ void CalcShapValuesForDocumentMulti(
     int flatFeatureCount,
     TConstArrayRef<NCB::NModelEvaluation::TCalcerIndexType> docIndices,
     size_t documentIdx,
-    TVector<TVector<double>>* shapValues
+    TVector<TVector<double>>* shapValues,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
-TShapPreparedTrees PrepareTrees(const TFullModel& model, NPar::TLocalExecutor* localExecutor);
+TShapPreparedTrees PrepareTrees(
+    const TFullModel& model,
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
+);
+
 TShapPreparedTrees PrepareTrees(
     const TFullModel& model,
     const NCB::TDataProvider* dataset, // can be nullptr if model has LeafWeights
     EPreCalcShapValues mode,
     NPar::TLocalExecutor* localExecutor,
-    bool calcInternalValues = false
+    bool calcInternalValues = false,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 void CalcShapValuesByLeaf(
@@ -134,7 +144,8 @@ void CalcShapValuesByLeaf(
     int logPeriod,
     bool calcInternalValues,
     NPar::TLocalExecutor* localExecutor,
-    TShapPreparedTrees* preparedTrees 
+    TShapPreparedTrees* preparedTrees,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 // returned: ShapValues[documentIdx][dimension][feature]
@@ -144,7 +155,8 @@ TVector<TVector<TVector<double>>> CalcShapValuesMulti(
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
-    NPar::TLocalExecutor* localExecutor
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 // returned: ShapValues[documentIdx][feature]
@@ -154,12 +166,13 @@ TVector<TVector<double>> CalcShapValues(
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
     int logPeriod,
     EPreCalcShapValues mode,
-    NPar::TLocalExecutor* localExecutor
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 // returned: ShapValues[featureIdx][dim][documentIdx]
 TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
-    const TFullModel& model, 
+    const TFullModel& model,
     const TVector<TIntrusivePtr<NCB::NModelEvaluation::IQuantizedData>>& quantizedFeatures,
     const TVector<TVector<NCB::NModelEvaluation::TCalcerIndexType>>& indexes,
     const TMaybe<TFixedFeatureParams>& fixedFeatureParams,
@@ -167,7 +180,8 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
     const size_t documentCount,
     int logPeriod,
     TShapPreparedTrees* preparedTrees,
-    NPar::TLocalExecutor* localExecutor
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 // outputs for each document in order for each dimension in order an array of feature contributions
@@ -177,7 +191,8 @@ void CalcAndOutputShapValues(
     const TString& outputPath,
     int logPeriod,
     EPreCalcShapValues mode,
-    NPar::TLocalExecutor* localExecutor
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );
 
 void CalcShapValuesInternalForFeature(
@@ -189,5 +204,6 @@ void CalcShapValuesInternalForFeature(
     ui32 featuresCount,
     const NCB::TObjectsDataProvider& objectsData,
     TVector<TVector<TVector<double>>>* shapValues, // [docIdx][featureIdx][dim]
-    NPar::TLocalExecutor* localExecutor
+    NPar::TLocalExecutor* localExecutor,
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
 );

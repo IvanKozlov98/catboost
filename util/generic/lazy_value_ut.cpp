@@ -1,6 +1,6 @@
 #include "lazy_value.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 Y_UNIT_TEST_SUITE(TLazyValueTestSuite) {
     Y_UNIT_TEST(TestLazyValue) {
@@ -39,7 +39,7 @@ Y_UNIT_TEST_SUITE(TLazyValueTestSuite) {
 
         TLazyValue<int> notEmptyCopy = value;
         UNIT_ASSERT(notEmptyCopy);
-        UNIT_ASSERT_EQUAL(*notEmptyCopy, 5)
+        UNIT_ASSERT_EQUAL(*notEmptyCopy, 5);
     }
 
     struct TCopyCounter {

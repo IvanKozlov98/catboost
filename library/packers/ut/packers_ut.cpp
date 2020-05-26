@@ -1,4 +1,4 @@
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 #include <util/stream/output.h>
 #include <utility>
@@ -54,7 +54,7 @@ void TPackersTest::TestPacker(const TData& data) {
 
     TData dataTmp;
     TPacker().UnpackLeaf(buf.Get(), dataTmp);
-    UNIT_ASSERT(data == dataTmp)
+    UNIT_ASSERT(data == dataTmp);
 }
 
 template <class TData, class TPacker>

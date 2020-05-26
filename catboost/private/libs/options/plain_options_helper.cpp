@@ -7,7 +7,7 @@
 
 #include <catboost/libs/logging/logging.h>
 
-#include <library/json/json_value.h>
+#include <library/cpp/json/json_value.h>
 
 #include <util/generic/strbuf.h>
 #include <util/string/builder.h>
@@ -377,6 +377,7 @@ void NCatboostOptions::PlainJsonToOptions(
     CopyOption(plainOptions, "feature_weights", &featurePenaltiesOptions, &seenKeys);
     CopyOption(plainOptions, "penalties_coefficient", &featurePenaltiesOptions, &seenKeys);
     CopyOption(plainOptions, "first_feature_use_penalties", &featurePenaltiesOptions, &seenKeys);
+    CopyOption(plainOptions, "per_object_feature_penalties", &featurePenaltiesOptions, &seenKeys);
 
     //feature evaluation options
     if (GetTaskType(plainOptions) == ETaskType::GPU) {
@@ -429,6 +430,7 @@ void NCatboostOptions::PlainJsonToOptions(
     CopyOption(plainOptions, "classes_count", &dataProcessingOptions, &seenKeys);
     CopyOption(plainOptions, "class_names", &dataProcessingOptions, &seenKeys);
     CopyOption(plainOptions, "class_weights", &dataProcessingOptions, &seenKeys);
+    CopyOption(plainOptions, "auto_class_weights", &dataProcessingOptions, &seenKeys);
     CopyOption(plainOptions, "dev_default_value_fraction_for_sparse", &dataProcessingOptions, &seenKeys);
     CopyOption(plainOptions, "dev_sparse_array_indexing", &dataProcessingOptions, &seenKeys);
     CopyOption(plainOptions, "gpu_cat_features_storage", &dataProcessingOptions, &seenKeys);
@@ -441,6 +443,7 @@ void NCatboostOptions::PlainJsonToOptions(
     CopyOption(plainOptions, "border_count", &floatFeaturesBinarization, &seenKeys);
     CopyOptionWithNewKey(plainOptions, "feature_border_type", "border_type", &floatFeaturesBinarization, &seenKeys);
     CopyOption(plainOptions, "nan_mode", &floatFeaturesBinarization, &seenKeys);
+    CopyOption(plainOptions, "dev_max_subset_size_for_build_borders", &floatFeaturesBinarization, &seenKeys);
     CopyPerFloatFeatureQuantization(plainOptions, "per_float_feature_quantization", &dataProcessingOptions, &seenKeys);
 
     auto& textProcessingOptions = dataProcessingOptions["text_processing_options"];
@@ -731,6 +734,9 @@ void NCatboostOptions::ConvertOptionsToPlainJson(
             CopyOption(penaltiesOptions, "first_feature_use_penalties", &plainOptionsJson, &seenKeys);
             DeleteSeenOption(&optionsCopyTreePenalties, "first_feature_use_penalties");
 
+            CopyOption(penaltiesOptions, "per_object_feature_penalties", &plainOptionsJson, &seenKeys);
+            DeleteSeenOption(&optionsCopyTreePenalties, "per_object_feature_penalties");
+
             CB_ENSURE(optionsCopyTreePenalties.GetMapSafe().empty(), "penalties: key " + optionsCopyTreePenalties.GetMapSafe().begin()->first + " wasn't added to plain options.");
             DeleteSeenOption(&optionsCopyTree, "penalties");
         }
@@ -831,6 +837,9 @@ void NCatboostOptions::ConvertOptionsToPlainJson(
         CopyOption(dataProcessingOptions, "class_weights", &plainOptionsJson, &seenKeys);
         DeleteSeenOption(&optionsCopyDataProcessing, "class_weights");
 
+        CopyOption(dataProcessingOptions, "auto_class_weights", &plainOptionsJson, &seenKeys);
+        DeleteSeenOption(&optionsCopyDataProcessing, "auto_class_weights");
+
         CopyOption(dataProcessingOptions, "dev_default_value_fraction_for_sparse", &plainOptionsJson, &seenKeys);
         DeleteSeenOption(&optionsCopyDataProcessing, "dev_default_value_fraction_for_sparse");
 
@@ -872,6 +881,9 @@ void NCatboostOptions::ConvertOptionsToPlainJson(
 
             CopyOption(floatFeaturesBinarization, "nan_mode", &plainOptionsJson, &seenKeys);
             DeleteSeenOption(&optionsCopyDataProcessingFloatFeaturesBinarization, "nan_mode");
+
+            CopyOption(floatFeaturesBinarization, "dev_max_subset_size_for_build_borders", &plainOptionsJson, &seenKeys);
+            DeleteSeenOption(&optionsCopyDataProcessingFloatFeaturesBinarization, "dev_max_subset_size_for_build_borders");
 
             CB_ENSURE(optionsCopyDataProcessingFloatFeaturesBinarization.GetMapSafe().empty(),
                       "float_features_binarization: key " + optionsCopyDataProcessingFloatFeaturesBinarization.GetMapSafe().begin()->first + " wasn't added to plain options.");

@@ -17,33 +17,21 @@ IF (NOT USE_STL_SYSTEM)
     )
 ENDIF()
 
-IF (OS_WINDOWS)
-    SRCS(
-        demangle_stub.cpp
-    )
-ELSE ()
-    IF (CPPDEMANGLE_DEBUG)
-        CFLAGS(
-            -DDEBUGGING
-        )
-    ENDIF()
+CFLAGS(
+    -D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS
+)
 
-    CFLAGS(
-        -nostdinc++
-    )
-
-    SRCS(
-        demangle.cpp
-    )
-ENDIF ()
-
-IF (MUSL)
-    ADDINCL(
-        contrib/libs/musl/arch/x86_64
-        contrib/libs/musl/arch/generic
-        contrib/libs/musl/include
-        contrib/libs/musl/extra
-    )
-ENDIF ()
+SRCS(
+    cxa_demangle.cpp
+)
 
 END()
+
+RECURSE(
+    filt
+    fuzz
+)
+
+RECURSE_FOR_TESTS(
+    ut
+)

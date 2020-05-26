@@ -2,6 +2,7 @@
 
 #include <catboost/private/libs/algo/data.h>
 #include <catboost/private/libs/algo/approx_dimension.h>
+#include <catboost/libs/data/feature_names_converter.h>
 #include <catboost/libs/data/objects_grouping.h>
 #include <catboost/libs/helpers/cpu_random.h>
 #include <catboost/libs/helpers/exception.h>
@@ -104,12 +105,13 @@ namespace {
             : TProductIteratorBase<TEnumeratedSet, TValue>(sets)
         {}
 
-        virtual TMaybe<TConstArrayRef<TValue>> Next() override {
+        virtual bool Next(TConstArrayRef<TValue>* value) override {
             if (this->IsIteratorReachedEnd()) {
-                 return this->END_VALUE;
+                 return false;
             }
             this->PassedElementsCount++;
-            return this->NextWithOffset(1);
+            *value = this->NextWithOffset(1);
+            return true;
         }
     };
 
@@ -159,15 +161,16 @@ namespace {
             this->TotalElementsCount = count;
         }
 
-        virtual TMaybe<TConstArrayRef<TValue>> Next() override {
+        virtual bool Next(TConstArrayRef<TValue>* values) override {
             if (this->IsIteratorReachedEnd()) {
-                 return this->END_VALUE;
+                 return false;
             }
             ui64 offset = 1;
             offset = FlatOffsets[OffsetIndex];
             ++OffsetIndex;
             this->PassedElementsCount++;
-            return this->NextWithOffset(offset);
+            *values = this->NextWithOffset(offset);
+            return true;
         }
     };
 
@@ -688,6 +691,7 @@ namespace {
     }
 
     bool ParseJsonParams(
+        const NCB::TDataMetaInfo& metaInfo,
         const NJson::TJsonValue& modelParamsToBeTried,
         NCatboostOptions::TCatBoostOptions *catBoostOptions,
         NCatboostOptions::TOutputFilesOptions *outputFileOptions) {
@@ -695,6 +699,7 @@ namespace {
             NJson::TJsonValue jsonParams;
             NJson::TJsonValue outputJsonParams;
             NCatboostOptions::PlainJsonToOptions(modelParamsToBeTried, &jsonParams, &outputJsonParams);
+            ConvertParamsToCanonicalFormat(metaInfo, &jsonParams);
             *catBoostOptions = NCatboostOptions::LoadOptions(jsonParams);
             outputFileOptions->Load(outputJsonParams);
 
@@ -738,27 +743,29 @@ namespace {
             gridIterator->GetTotalElementsCount(),
             &logger
         );
-        double bestParamsSetMetricValue;
+        double bestParamsSetMetricValue = 0;
         // Other parameters
         NCB::TTrainingDataProviderPtr quantizedData;
         TQuantizationParamsInfo lastQuantizationParamsSet;
         TLabelConverter labelConverter;
         int iterationIdx = 0;
         int bestIterationIdx = 0;
+
         TProfileInfo profile(gridIterator->GetTotalElementsCount());
-        while (auto paramsSet = gridIterator->Next()) {
+        TConstArrayRef<NJson::TJsonValue> paramsSet;
+        while (gridIterator->Next(&paramsSet)) {
             profile.StartIterationBlock();
             // paramsSet: {border_count, feature_border_type, nan_mode, [others]}
             TQuantizationParamsInfo quantizationParamsSet;
-            quantizationParamsSet.BinsCount = GetRandomValueIfNeeded((*paramsSet)[0], randDistGenerators).GetInteger();
-            quantizationParamsSet.BorderType = FromString<EBorderSelectionType>((*paramsSet)[1].GetString());
-            quantizationParamsSet.NanMode = FromString<ENanMode>((*paramsSet)[2].GetString());
+            quantizationParamsSet.BinsCount = GetRandomValueIfNeeded(paramsSet[0], randDistGenerators).GetInteger();
+            quantizationParamsSet.BorderType = FromString<EBorderSelectionType>(paramsSet[1].GetString());
+            quantizationParamsSet.NanMode = FromString<ENanMode>(paramsSet[2].GetString());
 
             AssignOptionsToJson(
                 TConstArrayRef<TString>(paramNames),
                 TConstArrayRef<NJson::TJsonValue>(
-                    paramsSet->begin() + IndexOfFirstTrainingParameter,
-                    paramsSet->end()
+                    paramsSet.begin() + IndexOfFirstTrainingParameter,
+                    paramsSet.end()
                 ), // Ignoring quantization params
                 randDistGenerators,
                 modelParamsToBeTried
@@ -766,7 +773,12 @@ namespace {
 
             NCatboostOptions::TCatBoostOptions catBoostOptions(ETaskType::CPU);
             NCatboostOptions::TOutputFilesOptions outputFileOptions;
-            bool areParamsValid = ParseJsonParams(*modelParamsToBeTried, &catBoostOptions, &outputFileOptions);
+            bool areParamsValid = ParseJsonParams(
+                data.Get()->MetaInfo,
+                *modelParamsToBeTried,
+                &catBoostOptions,
+                &outputFileOptions
+            );
             if (!areParamsValid) {
                 continue;
             }
@@ -880,7 +892,7 @@ namespace {
                 //log parameters
                 LogParameters(
                     paramNames,
-                    *paramsSet,
+                    paramsSet,
                     parametersToken,
                     generalQuantizeParamsInfo,
                     oneIterLogger
@@ -915,7 +927,7 @@ namespace {
             data = data->GetSubset(objectsGroupingSubset, cpuUsedRamLimit, localExecutor);
         }
 
-        TSetLogging inThisScope(ELoggingLevel::Verbose);
+        TSetLogging inThisScope(ELoggingLevel::Debug);
         TLogger logger;
         TString searchToken = "loss";
         const auto parametersToken = GetParametersToken();
@@ -927,7 +939,7 @@ namespace {
             gridIterator->GetTotalElementsCount(),
             &logger
         );
-        double bestParamsSetMetricValue;
+        double bestParamsSetMetricValue = 0;
         // Other parameters
         NCB::TTrainingDataProviders trainTestData;
         TQuantizationParamsInfo lastQuantizationParamsSet;
@@ -935,19 +947,20 @@ namespace {
         int iterationIdx = 0;
         int bestIterationIdx = 0;
         TProfileInfo profile(gridIterator->GetTotalElementsCount());
-        while (auto paramsSet = gridIterator->Next()) {
+        TConstArrayRef<NJson::TJsonValue> paramsSet;
+        while (gridIterator->Next(&paramsSet)) {
             profile.StartIterationBlock();
             // paramsSet: {border_count, feature_border_type, nan_mode, [others]}
             TQuantizationParamsInfo quantizationParamsSet;
-            quantizationParamsSet.BinsCount = GetRandomValueIfNeeded((*paramsSet)[0], randDistGenerators).GetInteger();
-            quantizationParamsSet.BorderType = FromString<EBorderSelectionType>((*paramsSet)[1].GetString());
-            quantizationParamsSet.NanMode = FromString<ENanMode>((*paramsSet)[2].GetString());
+            quantizationParamsSet.BinsCount = GetRandomValueIfNeeded(paramsSet[0], randDistGenerators).GetInteger();
+            quantizationParamsSet.BorderType = FromString<EBorderSelectionType>(paramsSet[1].GetString());
+            quantizationParamsSet.NanMode = FromString<ENanMode>(paramsSet[2].GetString());
 
             AssignOptionsToJson(
                 TConstArrayRef<TString>(paramNames),
                 TConstArrayRef<NJson::TJsonValue>(
-                    paramsSet->begin() + IndexOfFirstTrainingParameter,
-                    paramsSet->end()
+                    paramsSet.begin() + IndexOfFirstTrainingParameter,
+                    paramsSet.end()
                 ), // Ignoring quantization params
                 randDistGenerators,
                 modelParamsToBeTried
@@ -955,7 +968,12 @@ namespace {
 
             NCatboostOptions::TCatBoostOptions catBoostOptions(ETaskType::CPU);
             NCatboostOptions::TOutputFilesOptions outputFileOptions;
-            bool areParamsValid = ParseJsonParams(*modelParamsToBeTried, &catBoostOptions, &outputFileOptions);
+            bool areParamsValid = ParseJsonParams(
+                data.Get()->MetaInfo,
+                *modelParamsToBeTried,
+                &catBoostOptions,
+                &outputFileOptions
+            );
             if (!areParamsValid) {
                 continue;
             }
@@ -1097,7 +1115,7 @@ namespace {
                 //log parameters
                 LogParameters(
                     paramNames,
-                    *paramsSet,
+                    paramsSet,
                     parametersToken,
                     generalQuantizeParamsInfo,
                     oneIterLogger
@@ -1176,6 +1194,7 @@ namespace NCB {
         NJson::TJsonValue jsonParams;
         NJson::TJsonValue outputJsonParams;
         NCatboostOptions::PlainJsonToOptions(modelJsonParams, &jsonParams, &outputJsonParams);
+        ConvertParamsToCanonicalFormat(data.Get()->MetaInfo, &jsonParams);
         NCatboostOptions::TCatBoostOptions catBoostOptions(NCatboostOptions::LoadOptions(jsonParams));
         NCatboostOptions::TOutputFilesOptions outputFileOptions;
         outputFileOptions.Load(outputJsonParams);
@@ -1307,6 +1326,7 @@ namespace NCB {
         NJson::TJsonValue jsonParams;
         NJson::TJsonValue outputJsonParams;
         NCatboostOptions::PlainJsonToOptions(modelJsonParams, &jsonParams, &outputJsonParams);
+        ConvertParamsToCanonicalFormat(data.Get()->MetaInfo, &jsonParams);
         NCatboostOptions::TCatBoostOptions catBoostOptions(NCatboostOptions::LoadOptions(jsonParams));
         NCatboostOptions::TOutputFilesOptions outputFileOptions;
         outputFileOptions.Load(outputJsonParams);

@@ -36,14 +36,14 @@ namespace NCatboostOptions {
         TOption<EGrowPolicy> GrowPolicy;
         TOption<ui32> MaxLeaves;
         TOption<double> MinDataInLeaf;
+        TOption<ui32> DevExclusiveFeaturesBundleMaxBuckets;
 
         TCpuOnlyOption<ESamplingFrequency> SamplingFrequency;
-        TCpuOnlyOption<float> ModelSizeReg;
+        TOption<float> ModelSizeReg;
 
         // changing this parameter can affect results due to numerical accuracy differences
         TCpuOnlyOption<ui32> DevScoreCalcObjBlockSize;
 
-        TCpuOnlyOption<ui32> DevExclusiveFeaturesBundleMaxBuckets;
         TCpuOnlyOption<float> SparseFeaturesConflictFraction;
 
         TGpuOnlyOption<EObservationsToBootstrap> ObservationsToBootstrap;

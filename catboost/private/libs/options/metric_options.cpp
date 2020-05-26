@@ -31,7 +31,7 @@ bool IsValidForObjectiveOrEvalMetric(
     std::function<bool(ELossFunction)> predicate)
 {
     return predicate(objective) ||
-        (objective == ELossFunction::PythonUserDefinedPerObject &&
+        (IsUserDefined(objective) &&
             metricOptions.EvalMetric.IsSet() && predicate(metricOptions.EvalMetric->GetLossFunction()));
 }
 
@@ -85,7 +85,7 @@ static ELossFunction GetMetric(const NCatboostOptions::TLossDescription& lossDes
     if (lossFunction != ELossFunction::Combination) {
         return lossFunction;
     }
-    return GetMetricFromCombination(lossDescription.GetLossParams());
+    return GetMetricFromCombination(lossDescription.GetLossParamsMap());
 }
 
 void CheckMetrics(const NCatboostOptions::TMetricOptions& metrics) {

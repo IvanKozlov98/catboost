@@ -3,8 +3,8 @@
 LIBRARY()
 
 PEERDIR(
-    library/coroutine/engine
-    library/dns
+    library/cpp/coroutine/engine
+    library/cpp/dns
 )
 
 SRCS(

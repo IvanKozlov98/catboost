@@ -70,6 +70,7 @@ TTargetClassifier BuildTargetClassifier(
         case ELossFunction::YetiRank:
         case ELossFunction::YetiRankPairwise:
         case ELossFunction::StochasticFilter:
+        case ELossFunction::StochasticRank:
         case ELossFunction::Logloss:
         case ELossFunction::CrossEntropy:
         case ELossFunction::Huber:
@@ -83,6 +84,7 @@ TTargetClassifier BuildTargetClassifier(
         case ELossFunction::MultiClassOneVsAll:
             return TTargetClassifier(GetMultiClassBorders(targetBorderCount));
 
+        case ELossFunction::PythonUserDefinedMultiRegression:
         case ELossFunction::PythonUserDefinedPerObject: {
             Y_ASSERT(objectiveDescriptor.Defined());
             return TTargetClassifier(

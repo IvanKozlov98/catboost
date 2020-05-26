@@ -28,9 +28,9 @@
 #include <catboost/libs/train_lib/options_helper.h>
 #include <catboost/libs/train_lib/train_model.h>
 
-#include <library/json/json_prettifier.h>
-#include <library/json/json_value.h>
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/json/json_prettifier.h>
+#include <library/cpp/json/json_value.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/folder/path.h>
 #include <util/generic/scope.h>
@@ -333,18 +333,27 @@ namespace NCatboostCuda {
                     ->CalcMaxCategoricalFeaturesUniqueValuesCountOnLearn()
                   > updatedCatboostOptions.CatFeatureParams.Get().OneHotMaxSize.Get());
 
-            TTrainingForCPUDataProviders trainingDataForFinalCtrCalculation;
-
+            TTrainingDataProviders trainingDataForFinalCtrCalculation;
+            // TODO(kirillovs): remove casts later
             if (saveFinalCtrsInModel) {
                 // do it at this stage to check before training
                 trainingDataForFinalCtrCalculation = trainingData.Cast<TQuantizedForCPUObjectsDataProvider>();
             }
 
             auto quantizedFeaturesInfo = trainingData.Learn->ObjectsData->GetQuantizedFeaturesInfo();
-
+            TVector<TExclusiveFeaturesBundle> exclusiveBundlesCopy;
+            const auto lossFunction = catboostOptions.LossFunctionDescription->LossFunction;
+            // TODO(kirillovs): check and enable on pairwise losses
+            if (!IsGpuPlainDocParallelOnlyMode(lossFunction)) {
+                exclusiveBundlesCopy.assign(
+                    trainingData.Learn->ObjectsData->GetExclusiveFeatureBundlesMetaData().begin(),
+                    trainingData.Learn->ObjectsData->GetExclusiveFeatureBundlesMetaData().end()
+                );
+            }
             TBinarizedFeaturesManager featuresManager(updatedCatboostOptions.CatFeatureParams,
                                                       trainingData.FeatureEstimators,
                                                       *trainingData.Learn->MetaInfo.FeaturesLayout,
+                                                      exclusiveBundlesCopy,
                                                       quantizedFeaturesInfo);
 
 
@@ -503,9 +512,16 @@ namespace NCatboostCuda {
             auto quantizedFeaturesInfo = trainingData.Learn->ObjectsData->GetQuantizedFeaturesInfo();
 
             TFeatureEstimatorsPtr estimators;
+            TVector<TExclusiveFeaturesBundle> exclusiveBundlesCopy;
+            // TODO(kirillovs): check and enable in modelbased eval
+            /*exclusiveBundlesCopy.assign(
+                trainingData.Learn->ObjectsData->GetExclusiveFeatureBundlesMetaData().begin(),
+                trainingData.Learn->ObjectsData->GetExclusiveFeatureBundlesMetaData().end()
+            );*/
             TBinarizedFeaturesManager featuresManager(updatedCatboostOptions.CatFeatureParams,
                                                       estimators,
                                                       *trainingData.Learn->MetaInfo.FeaturesLayout,
+                                                      exclusiveBundlesCopy,
                                                       quantizedFeaturesInfo);
 
             SetDataDependentDefaultsForGpu(

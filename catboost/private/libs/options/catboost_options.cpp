@@ -3,7 +3,7 @@
 #include "json_helper.h"
 #include "restrictions.h"
 
-#include <library/json/json_reader.h>
+#include <library/cpp/json/json_reader.h>
 
 #include <util/generic/algorithm.h>
 #include <util/generic/set.h>
@@ -50,7 +50,7 @@ static std::tuple<ui32, ui32, ELeavesEstimation, double> GetEstimationMethodDefa
             break;
         }
         case ELossFunction::Lq: {
-            CB_ENSURE(lossFunctionConfig.GetLossParams().contains("q"), "Param q is mandatory for Lq loss");
+            CB_ENSURE(lossFunctionConfig.GetLossParamsMap().contains("q"), "Param q is mandatory for Lq loss");
             defaultEstimationMethod = ELeavesEstimation::Newton;
             const auto q = GetLqParam(lossFunctionConfig);
             if (q < 2) {
@@ -94,7 +94,7 @@ static std::tuple<ui32, ui32, ELeavesEstimation, double> GetEstimationMethodDefa
             break;
         }
         case ELossFunction::Expectile: {
-            CB_ENSURE(lossFunctionConfig.GetLossParams().contains("alpha"), "Param alpha is mandatory for expectile loss");
+            CB_ENSURE(lossFunctionConfig.GetLossParamsMap().contains("alpha"), "Param alpha is mandatory for expectile loss");
             defaultNewtonIterations = 5;
             defaultGradientIterations = 10;
             defaultEstimationMethod = ELeavesEstimation::Newton;
@@ -165,8 +165,15 @@ static std::tuple<ui32, ui32, ELeavesEstimation, double> GetEstimationMethodDefa
             // doesn't have Newton
             break;
         }
+        case ELossFunction::StochasticRank: {
+            defaultEstimationMethod = ELeavesEstimation::Gradient;
+            defaultGradientIterations = 1;
+            // doesn't have Newton
+            break;
+        }
         case ELossFunction::UserPerObjMetric:
         case ELossFunction::UserQuerywiseMetric:
+        case ELossFunction::PythonUserDefinedMultiRegression:
         case ELossFunction::PythonUserDefinedPerObject: {
             //skip
             defaultNewtonIterations = 1;
@@ -174,7 +181,7 @@ static std::tuple<ui32, ui32, ELeavesEstimation, double> GetEstimationMethodDefa
             break;
         }
         case ELossFunction::Tweedie: {
-            CB_ENSURE(lossFunctionConfig.GetLossParams().contains("variance_power"), "Param variance_power is mandatory for Tweedie loss");
+            CB_ENSURE(lossFunctionConfig.GetLossParamsMap().contains("variance_power"), "Param variance_power is mandatory for Tweedie loss");
             defaultEstimationMethod = ELeavesEstimation::Newton;
             defaultNewtonIterations = 1;
             defaultGradientIterations = 1;
@@ -183,7 +190,7 @@ static std::tuple<ui32, ui32, ELeavesEstimation, double> GetEstimationMethodDefa
         case ELossFunction::Combination: {
             bool haveDefaults = false;
             IterateOverCombination(
-                lossFunctionConfig.GetLossParams(),
+                    lossFunctionConfig.GetLossParamsMap(),
                 [&] (const auto& loss, float weight) {
                     if (!haveDefaults) {
                         std::tie(defaultNewtonIterations, defaultGradientIterations, defaultEstimationMethod, defaultL2Reg) =
@@ -544,12 +551,15 @@ void NCatboostOptions::TCatBoostOptions::Validate() const {
             CB_ENSURE(classesCount > 1, "classes-count should be at least 2");
         }
         const auto& classWeights = DataProcessingOptions->ClassWeights.Get();
-        if (!classWeights.empty()) {
+        const EAutoClassWeightsType autoClassWeights = DataProcessingOptions->AutoClassWeights.Get();
+        if (!classWeights.empty() || autoClassWeights != EAutoClassWeightsType::None) {
             CB_ENSURE(lossFunction == ELossFunction::Logloss || IsMultiClassOnlyMetric(lossFunction) || IsUserDefined(lossFunction),
                       "class weights takes effect only with Logloss, MultiClass, MultiClassOneVsAll and user-defined loss functions");
-            CB_ENSURE(lossFunction != ELossFunction::Logloss || (classWeights.size() == 2),
-                      "if loss-function is Logloss, then class weights should be given for 0 and 1 classes");
-            CB_ENSURE(classesCount == 0 || classesCount == classWeights.size(), "class weights should be specified for each class in range 0, ... , classes_count - 1");
+            if (!classWeights.empty()) {
+                CB_ENSURE(lossFunction != ELossFunction::Logloss || (classWeights.size() == 2),
+                          "if loss-function is Logloss, then class weights should be given for 0 and 1 classes");
+                CB_ENSURE(classesCount == 0 || classesCount == classWeights.size(), "class weights should be specified for each class in range 0, ... , classes_count - 1");
+            }
         }
     }
 
@@ -584,7 +594,7 @@ void NCatboostOptions::TCatBoostOptions::Validate() const {
             ObliviousTreeOptions->LeavesEstimationBacktrackingType != ELeavesEstimationStepBacktracking::Armijo,
             "Backtracking type Armijo is supported only on GPU");
         CB_ENSURE(
-            lossFunction != ELossFunction::PythonUserDefinedPerObject
+            !IsUserDefined(lossFunction)
             || ObliviousTreeOptions->LeavesEstimationBacktrackingType == ELeavesEstimationStepBacktracking::No,
             "Backtracking is not supported for custom loss functions on CPU");
     }
@@ -611,16 +621,16 @@ void NCatboostOptions::TCatBoostOptions::Validate() const {
     // Delete it when MLTOOLS-3572 is implemented.
     if (ShouldBinarizeLabel(LossFunctionDescription->LossFunction.Get())) {
         const TString message = "Metric parameter 'border' isn't supported when target is binarized.";
-        CB_ENSURE(!LossFunctionDescription->LossParams->contains("border"), message);
-        CB_ENSURE(!MetricOptions->EvalMetric->LossParams->contains("border"), message);
-        CB_ENSURE(!MetricOptions->ObjectiveMetric->LossParams->contains("border"), message);
+        CB_ENSURE(!LossFunctionDescription->GetLossParamsMap().contains("border"), message);
+        CB_ENSURE(!MetricOptions->EvalMetric->GetLossParamsMap().contains("border"), message);
+        CB_ENSURE(!MetricOptions->ObjectiveMetric->GetLossParamsMap().contains("border"), message);
         for (const auto& metric : MetricOptions->CustomMetrics.Get()) {
-            CB_ENSURE(!metric.LossParams->contains("border"), message);
+            CB_ENSURE(!metric.GetLossParamsMap().contains("border"), message);
         }
     }
 
     // Delete it when MLTOOLS-3612 is implemented.
-    CB_ENSURE(!LossFunctionDescription->LossParams->contains("use_weights"),
+    CB_ENSURE(!LossFunctionDescription->GetLossParamsMap().contains("use_weights"),
         "Metric parameter 'use_weights' isn't supported for objective function. " <<
         "If weights are present they will necessarily be used in optimization. " <<
         "It cannot be disabled.");
@@ -667,6 +677,10 @@ void NCatboostOptions::TCatBoostOptions::Validate() const {
 
     if (BoostingOptions->Langevin.GetUnchecked()) {
         CB_ENSURE(SystemOptions->IsSingleHost(), "Langevin boosting is supported in single-host mode only.");
+    }
+
+    if (GetTaskType() == ETaskType::CPU && ObliviousTreeOptions->FeaturePenalties.IsSet()) {
+        ValidateFeaturePenaltiesOptions(ObliviousTreeOptions->FeaturePenalties.Get());
     }
 
     if (ObliviousTreeOptions->GrowPolicy != EGrowPolicy::SymmetricTree) {
@@ -742,6 +756,7 @@ void NCatboostOptions::TCatBoostOptions::SetNotSpecifiedOptionsToDefaults() {
             }
             break;
         }
+        case ELossFunction::PythonUserDefinedMultiRegression:
         case ELossFunction::PythonUserDefinedPerObject: {
             ObliviousTreeOptions->LeavesEstimationBacktrackingType.SetDefault(ELeavesEstimationStepBacktracking::No);
             break;
@@ -763,17 +778,43 @@ void NCatboostOptions::TCatBoostOptions::SetNotSpecifiedOptionsToDefaults() {
         }
         case ELossFunction::PairLogit:
         case ELossFunction::PairLogitPairwise: {
-            NCatboostOptions::TLossDescription lossDescription;
-            lossDescription.LossParams.Set(LossFunctionDescription->GetLossParams());
-            lossDescription.LossFunction.Set(ELossFunction::PairLogit);
+            NCatboostOptions::TLossDescription lossDescription = LossFunctionDescription->CloneWithLossFunction(ELossFunction::PairLogit);
             MetricOptions->ObjectiveMetric.Set(lossDescription);
             break;
         }
         case ELossFunction::StochasticFilter: {
-            NCatboostOptions::TLossDescription lossDescription;
-            lossDescription.LossParams.Set(LossFunctionDescription->GetLossParams());
-            lossDescription.LossFunction.Set(ELossFunction::FilteredDCG);
+            NCatboostOptions::TLossDescription lossDescription = LossFunctionDescription->CloneWithLossFunction(ELossFunction::FilteredDCG);
             MetricOptions->ObjectiveMetric.Set(lossDescription);
+            break;
+        }
+        case ELossFunction::StochasticRank: {
+            NCatboostOptions::TLossDescription lossDescription;
+            const auto& lossParams = LossFunctionDescription->GetLossParamsMap();
+            CB_ENSURE(lossParams.contains("metric"), "StochasticRank requires metric param");
+            ELossFunction targetMetric = FromString<ELossFunction>(lossParams.at("metric"));
+            TVector<std::pair<TString, TString>> metricParams;
+            TSet<TString> validParams;
+            switch (targetMetric) {
+                case ELossFunction::DCG:
+                case ELossFunction::NDCG:
+                    validParams = {"top", "type", "denominator", "hints"};
+                    break;
+                case ELossFunction::PFound:
+                    validParams = {"top", "decay", "hints"};
+                    break;
+                default:
+                    CB_ENSURE(false, "StochasticRank does not support target_metric " << targetMetric);
+            }
+            for (const auto& key : LossFunctionDescription->GetLossParamKeysOrdered()) {
+                if (!validParams.contains(key)) {
+                    continue;
+                }
+                metricParams.emplace_back(key, lossParams.at(key));
+            }
+            lossDescription.LossParams.Set(TLossParams::FromVector(metricParams));
+            lossDescription.LossFunction.Set(targetMetric);
+            MetricOptions->ObjectiveMetric.Set(lossDescription);
+            ObliviousTreeOptions->LeavesEstimationBacktrackingType.SetDefault(ELeavesEstimationStepBacktracking::No);
             break;
         }
         default: {
@@ -847,6 +888,9 @@ void NCatboostOptions::TCatBoostOptions::SetNotSpecifiedOptionsToDefaults() {
                     shrinkRate = 0.01;
                 }
             }
+            if (ObliviousTreeOptions->LeavesEstimationBacktrackingType.NotSet()) {
+                ObliviousTreeOptions->LeavesEstimationBacktrackingType.SetDefault(ELeavesEstimationStepBacktracking::No);
+            }
         }
 
         if (!ObliviousTreeOptions->MonotoneConstraints->empty() &&
@@ -858,17 +902,6 @@ void NCatboostOptions::TCatBoostOptions::SetNotSpecifiedOptionsToDefaults() {
                 shrinkRate = 0.2;
             }
         }
-
-        if (shrinkRate.IsSet() && !BoostingOptions->BoostFromAverage.IsSet()) {
-            BoostingOptions->BoostFromAverage.Set(false);
-        }
-
-        // TODO(nikitxskv): Remove it after MLTOOLS-4158.
-        CB_ENSURE(
-            shrinkRate == 0.0f || !BoostingOptions->BoostFromAverage.Get(),
-            "You cannot use boost from average with specified model_shrink_rate option "
-            "(automatic specified for monotonic constraints and Langevin boosting)."
-        );
     }
 
     SetLeavesEstimationDefault();

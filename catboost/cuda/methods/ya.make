@@ -70,6 +70,7 @@ SRCS(
     tree_ctr_datasets_visitor.cpp
     serialization_helper.cpp
     pointwise_optimization_subsets.cpp
+    update_feature_weights.cpp
 
     pairwise_oblivious_trees/pairwise_score_calcer_for_policy.cpp
     pairwise_oblivious_trees/pairwise_scores_calcer.cpp
@@ -95,7 +96,7 @@ PEERDIR(
     catboost/libs/loggers
     catboost/libs/metrics
     catboost/libs/overfitting_detector
-    library/threading/local_executor
+    library/cpp/threading/local_executor
 )
 
 INCLUDE(${ARCADIA_ROOT}/catboost/cuda/cuda_lib/default_nvcc_flags.make.inc)

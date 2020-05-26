@@ -8,7 +8,7 @@
 #include <catboost/libs/metrics/metric.h>
 #include <catboost/cuda/gpu_data/samples_grouping_gpu.h>
 
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 namespace NCatboostCuda {
     class IGpuMetric {
@@ -95,7 +95,7 @@ namespace NCatboostCuda {
             auto metric = GetMetricDescription().GetLossFunction();
             CB_ENSURE(target.GetScoreMetricType() == metric, "Error: can't compute metric " << metric << " on GPU");
             TMetricHolder stats = target.ComputeStats(point,
-                                                      GetMetricDescription().GetLossParams());
+                                                      GetMetricDescription().GetLossParamsMap());
             return stats;
         };
     };

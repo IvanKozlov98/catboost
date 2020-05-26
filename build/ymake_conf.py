@@ -50,10 +50,15 @@ class Platform(object):
         self.is_x86_64 = self.arch in ('x86_64', 'amd64')
         self.is_intel = self.is_x86 or self.is_x86_64
 
-        self.is_armv7 = self.arch in ('armv7', 'armv7a', 'armv7a_neon', 'arm')
-        self.is_armv8 = self.arch in ('armv8', 'armv8a', 'arm64', 'aarch64')
+        self.is_armv7 = self.arch in ('armv7', 'armv7a', 'armv7a_neon', 'arm', 'armv7ahf_cortex_a35', 'armv7ahf_cortex_a53')
+        self.is_armv8 = self.arch in ('armv8', 'armv8a', 'arm64', 'aarch64', 'armv8a_cortex_a35', 'armv8a_cortex_a53')
         self.is_arm = self.is_armv7 or self.is_armv8
-        self.is_armv7_neon = self.arch == 'armv7a_neon'
+        self.is_armv7_neon = self.arch in ('armv7a_neon', 'armv7ahf_cortex_a35', 'armv7ahf_cortex_a53')
+
+        self.is_cortex_a35 = self.arch in ('armv7ahf_cortex_a35', 'armv8a_cortex_a35')
+        self.is_cortex_a53 = self.arch in ('armv7ahf_cortex_a53', 'armv8a_cortex_a53')
+
+        self.is_armv7hf = self.arch in ('armv7ahf_cortex_a35', 'armv7ahf_cortex_a53')
 
         self.is_ppc64le = self.arch == 'ppc64le'
 
@@ -484,7 +489,7 @@ class Build(object):
 
     @property
     def is_debug(self):
-        return self.build_type == 'debug' or self.build_type.endswith('-debug')
+        return self.build_type in ('debug', 'debugnoasserts') or self.build_type.endswith('-debug')
 
     @property
     def is_size_optimized(self):
@@ -501,7 +506,7 @@ class Build(object):
 
     @property
     def with_ndebug(self):
-        return self.build_type in ('release', 'minsizerel', 'valgrind-release', 'profile', 'gprof')
+        return self.build_type in ('release', 'minsizerel', 'valgrind-release', 'profile', 'gprof', 'debugnoasserts')
 
     @property
     def is_valgrind(self):
@@ -1044,13 +1049,19 @@ class GnuToolchain(Toolchain):
                 target_triple = select(default=None, selectors=[
                     (target.is_linux and target.is_x86_64, 'x86_64-linux-gnu'),
                     (target.is_linux and target.is_armv8, 'aarch64-linux-gnu'),
+                    (target.is_linux and target.is_armv7hf, 'arm-linux-gnueabihf'),
+                    (target.is_linux and target.is_armv7, 'arm-linux-gnueabi'),
                     (target.is_linux and target.is_ppc64le, 'powerpc64le-linux-gnu'),
                     (target.is_apple and target.is_x86, 'i386-apple-darwin14'),
                     (target.is_apple and target.is_x86_64, 'x86_64-apple-darwin14'),
                     (target.is_apple and target.is_armv7, 'armv7-apple-darwin14'),
-                (target.is_apple and target.is_armv8, 'arm64-apple-darwin14'),
-                (target.is_yocto and target.is_armv7, 'arm-poky-linux-gnueabi')
-            ])
+                    (target.is_apple and target.is_armv8, 'arm64-apple-darwin14'),
+                    (target.is_yocto and target.is_armv7, 'arm-poky-linux-gnueabi'),
+                    (target.is_android and target.is_x86, 'i686-linux-android16'),
+                    (target.is_android and target.is_x86_64, 'x86_64-linux-android21'),
+                    (target.is_android and target.is_armv7, 'armv7a-linux-androideabi16'),
+                    (target.is_android and target.is_armv8, 'aarch64-linux-android21'),
+                ])
 
             if target_triple:
                 self.c_flags_platform.append('--target={}'.format(target_triple))
@@ -1059,7 +1070,16 @@ class GnuToolchain(Toolchain):
             for root in list(self.tc.isystem):
                 self.c_flags_platform.extend(['-isystem', root])
 
-        if target.is_armv7_neon:
+        if target.is_android:
+            self.c_flags_platform.extend(['-isystem', '{}/sources/cxx-stl/llvm-libc++abi/include'.format(self.tc.name_marker)])
+
+        if target.is_cortex_a35:
+            self.c_flags_platform.append('-mcpu=cortex-a35')
+
+        elif target.is_cortex_a53:
+            self.c_flags_platform.append('-mcpu=cortex-a53')
+
+        elif target.is_armv7_neon:
             self.c_flags_platform.append('-mfpu=neon')
 
         if target.is_armv7 and build.is_size_optimized:
@@ -1190,7 +1210,7 @@ class GnuCompiler(Compiler):
         if not self.target.is_android:
             # There is no usable _FILE_OFFSET_BITS=64 support in Androids until API 21. And it's incomplete until at least API 24.
             # https://android.googlesource.com/platform/bionic/+/master/docs/32-bit-abi.md
-            # Arcadia have API 14 for 32-bit Androids.
+            # Arcadia have API 16 for 32-bit Androids.
             self.c_defines.append('-D_FILE_OFFSET_BITS=64')
 
         if self.target.is_linux or self.target.is_cygwin or self.target.is_yocto_lg_wk7y or self.target.is_yocto_jbl_portable_music or self.target.is_yocto_aacrh64_lightcomm_mt8516:
@@ -1204,9 +1224,6 @@ class GnuCompiler(Compiler):
                 self.c_warnings.append('-Wno-aligned-allocation-unavailable')
             if preset('MAPSMOBI_BUILD_TARGET') and self.target.is_arm:
                 self.c_foptions.append('-fembed-bitcode')
-
-        if self.target.is_android:
-            self.c_flags.append('-I{}/include/llvm-libc++abi/include'.format(tc.name_marker))
 
         self.extra_compile_opts = []
 
@@ -1430,7 +1447,7 @@ class GnuCompiler(Compiler):
         append('C_DEFINES', '-D__LONG_LONG_SUPPORTED')
 
         emit('OBJECT_SUF', '$OBJ_SUF%s.o' % self.cross_suffix)
-        emit('GCC_COMPILE_FLAGS', '$EXTRA_C_FLAGS -c -o $_COMPILE_OUTPUTS', '${input:SRC} ${pre=-I:INCLUDE}')
+        emit('GCC_COMPILE_FLAGS', '$EXTRA_C_FLAGS -c -o $_COMPILE_OUTPUTS', '${input:SRC} ${pre=-I:_C__INCLUDE} ${pre=-I:INCLUDE}')
         emit('EXTRA_COVERAGE_OUTPUT', '${output;noauto;hide;suf=${OBJ_SUF}%s.gcno:SRC}' % self.cross_suffix)
         emit('YNDEXER_OUTPUT_FILE', '${output;noauto;suf=${OBJ_SUF}%s.ydx.pb2:SRC}' % self.cross_suffix)  # should be the last output
 
@@ -1575,18 +1592,6 @@ class LD(Linker):
 
         self.musl = Setting('MUSL', convert=to_bool)
 
-        if target.is_android:
-            if self.ar is None:
-                tc_root = tc.name_marker if target.is_x86 or (tc.is_clang and tc.version_at_least(5, 0)) else '{}/clang'.format(tc.name_marker)
-                prefix = select(no_default=True, selectors=[
-                    (target.is_x86, 'i686-linux-android'),
-                    (target.is_x86_64, 'x86_64-linux-android'),
-                    (target.is_armv7, 'arm-linux-androideabi'),
-                    (target.is_armv8, 'aarch64-linux-android')
-                ])
-                self.ar = '{root}/bin/{prefix}-ar'.format(root=tc_root, prefix=prefix)
-                self.ar_plugin = '{root}/lib64/LLVMgold.{ext}'.format(root=tc_root, ext='dylib' if tc.host.is_macos else 'so')
-
         if self.ar is None:
             if target.is_apple:
                 # Use libtool. cctools ar does not understand -M needed for archive merging
@@ -1610,9 +1615,6 @@ class LD(Linker):
             self.ld_flags.extend(['-ldl', '-lrt', '-Wl,--no-as-needed'])
         elif target.is_android:
             self.ld_flags.extend(['-ldl', '-Wl,--no-as-needed'])
-            if is_positive('USE_LTO'):
-                # https://github.com/android-ndk/ndk/issues/498
-                self.ld_flags.append('-Wl,-plugin-opt,-emulated-tls')
         elif target.is_macos:
             self.ld_flags.append('-Wl,-no_deduplicate')
             if not self.tc.is_clang:
@@ -1675,10 +1677,6 @@ class LD(Linker):
         if target.is_android:
             if target.is_armv7 and self.type != Linker.LLD:
                 self.sys_lib.append('-Wl,--fix-cortex-a8')
-
-            if self.tc.is_clang and self.tc.compiler_version == '3.8':
-                self.sys_lib.append('-L{}/clang/arm-linux-androideabi/lib/armv7-a'.format(self.tc.name_marker))
-
             if target.is_armv7:
                 self.sys_lib.append('-lunwind')
             self.sys_lib.append('-lgcc')
@@ -2176,11 +2174,11 @@ class MSVCCompiler(MSVC, Compiler):
             }
 
             macro _SRC_cpp(SRC, SRCFLAGS...) {
-                .CMD=${TOOLCHAIN_ENV} ${CL_WRAPPER} ${CXX_COMPILER} /c /Fo$_COMPILE_OUTPUTS ${input;msvs_source:SRC} ${EXTRA_C_FLAGS} ${pre=/I :INCLUDE} ${CXXFLAGS} ${SRCFLAGS} ${hide;kv:"soe"} ${hide;kv:"p CC"} ${hide;kv:"pc yellow"}
+                .CMD=${TOOLCHAIN_ENV} ${CL_WRAPPER} ${CXX_COMPILER} /c /Fo$_COMPILE_OUTPUTS ${input;msvs_source:SRC} ${EXTRA_C_FLAGS} ${pre=/I :_C__INCLUDE} ${pre=/I :INCLUDE} ${CXXFLAGS} ${SRCFLAGS} ${hide;kv:"soe"} ${hide;kv:"p CC"} ${hide;kv:"pc yellow"}
             }
 
             macro _SRC_c(SRC, SRCFLAGS...) {
-                .CMD=${TOOLCHAIN_ENV} ${CL_WRAPPER} ${C_COMPILER} /c /Fo$_COMPILE_OUTPUTS ${input;msvs_source:SRC} ${EXTRA_C_FLAGS} ${pre=/I :INCLUDE} ${CFLAGS} ${CONLYFLAGS} ${SRCFLAGS} ${hide;kv:"soe"} ${hide;kv:"p CC"} ${hide;kv:"pc yellow"}
+                .CMD=${TOOLCHAIN_ENV} ${CL_WRAPPER} ${C_COMPILER} /c /Fo$_COMPILE_OUTPUTS ${input;msvs_source:SRC} ${EXTRA_C_FLAGS} ${pre=/I :_C__INCLUDE} ${pre=/I :INCLUDE} ${CFLAGS} ${CONLYFLAGS} ${SRCFLAGS} ${hide;kv:"soe"} ${hide;kv:"p CC"} ${hide;kv:"pc yellow"}
             }
 
             macro _SRC_m(SRC, SRCFLAGS...) {
@@ -2573,7 +2571,7 @@ class Cuda(object):
     def print_macros(self):
         cmd_vars = {
             'skip_nocxxinc': '' if self.cuda_arcadia_includes.value else '--y_skip_nocxxinc',
-            'includes': '${pre=-I:INCLUDE}' if self.cuda_arcadia_includes.value else '-I$ARCADIA_ROOT',
+            'includes': '${pre=-I:_C__INCLUDE} ${pre=-I:INCLUDE}' if self.cuda_arcadia_includes.value else '-I$ARCADIA_ROOT',
         }
 
         if not self.cuda_use_clang.value:
@@ -2725,7 +2723,7 @@ class Yasm(object):
         output = '${{output;noext;suf={}:SRC}}'.format('${OBJ_SUF}.o' if self.fmt != 'win' else '${OBJ_SUF}.obj')
         print '''\
 macro _SRC_yasm_impl(SRC, PREINCLUDES[], SRCFLAGS...) {{
-    .CMD={} -f {}$HARDWARE_ARCH {} $YASM_DEBUG_INFO_DISABLE_CACHE__NO_UID__ -D ${{pre=_;suf=_:HARDWARE_TYPE}} -D_YASM_ $ASM_PREFIX_VALUE {} ${{YASM_FLAGS}} ${{pre=-I :INCLUDE}} ${{SRCFLAGS}} -o {} ${{pre=-P :PREINCLUDES}} ${{input;hide:PREINCLUDES}} ${{input:SRC}} ${{kv;hide:"p AS"}} ${{kv;hide:"pc light-green"}}
+    .CMD={} -f {}$HARDWARE_ARCH {} $YASM_DEBUG_INFO_DISABLE_CACHE__NO_UID__ -D ${{pre=_;suf=_:HARDWARE_TYPE}} -D_YASM_ $ASM_PREFIX_VALUE {} ${{YASM_FLAGS}} ${{pre=-I :_ASM__INCLUDE}} ${{pre=-I :INCLUDE}} ${{SRCFLAGS}} -o {} ${{pre=-P :PREINCLUDES}} ${{input;hide:PREINCLUDES}} ${{input:SRC}} ${{kv;hide:"p AS"}} ${{kv;hide:"pc light-green"}}
 
 }}
 '''.format(self.yasm_tool, self.fmt, d_platform, ' '.join(self.flags), output)

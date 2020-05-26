@@ -5,7 +5,7 @@
 #include "maybe_owning_array_holder.h"
 #include "polymorphic_type_containers.h"
 
-#include <library/binsaver/bin_saver.h>
+#include <library/cpp/binsaver/bin_saver.h>
 
 #include <util/generic/algorithm.h>
 #include <util/generic/array_ref.h>
@@ -146,7 +146,7 @@ namespace NCB {
 
         TSparseSubsetBlocksIterator(TSparseSubsetBlocksIteratorData<TSize>&& data);
 
-        inline TMaybe<TSize> Next() override;
+        inline bool Next(TSize* ) override;
 
     private:
         TSparseSubsetBlocksIteratorData<TSize> Data;
@@ -213,7 +213,7 @@ namespace NCB {
 
         TSparseSubsetHybridIndexIterator(TSparseSubsetHybridIndexIteratorData<TSize>&& data);
 
-        inline TMaybe<TSize> Next() override;
+        inline bool Next(TSize* value) override;
 
     private:
         TSparseSubsetHybridIndexIteratorData<TSize> Data;

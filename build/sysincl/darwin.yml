@@ -69,6 +69,7 @@
   - mach/mach_types.h
   - mach/mach_vm.h
   - mach/machine.h
+  - mach/machine/vm_param.h
   - mach/processor_info.h
   - mach/semaphore.h
   - mach/shared_memory_server.h
@@ -108,6 +109,7 @@
   - objc/runtime.h
   - os/lock.h
   - panel.h
+  - pthread_spis.h
   - readline/history.h
   - readline/readline.h
   - readpassphrase.h
@@ -167,6 +169,7 @@
   - CoreFoundation/CFRunLoop.h
   - CoreFoundation/CFString.h
   - CoreFoundation/CFTimeZone.h
+  - CoreFoundation/CFUUID.h
   - CoreFoundation/CoreFoundation.h
   - CoreGraphics/CoreGraphics.h
   - CoreLocation/CoreLocation.h

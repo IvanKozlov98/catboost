@@ -3,13 +3,13 @@ PROGRAM()
 
 
 PEERDIR(
-    library/resource
+    library/cpp/resource
 )
 
 SRCS(
     main.cpp
 )
 
-INDUCED_DEPS(cpp library/resource/registry.h library/resource/resource.h)
+INDUCED_DEPS(cpp ${ARCADIA_ROOT}/library/resource/registry.h ${ARCADIA_ROOT}/library/resource/resource.h)
 
 END()

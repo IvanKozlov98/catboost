@@ -12,6 +12,7 @@
   - bcrypt.h
   - bits.h
   - capi.h
+  - cet.h
   - cfg.h
   - commctrl.h
   - commdlg.h
@@ -294,6 +295,7 @@
   - wrl/wrappers/corewrappers.h
   - ws2def.h
   - ws2ipdef.h
+  - ws2spi.h
   - ws2tcpip.h
   - wscapi.h
   - wspiapi.h

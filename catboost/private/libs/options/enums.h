@@ -145,10 +145,12 @@ enum class ELossFunction {
     QuerySoftMax,
     QueryCrossEntropy,
     StochasticFilter,
+    StochasticRank,
 
     /* user defined errors */
 
     PythonUserDefinedPerObject,
+    PythonUserDefinedMultiRegression,
     UserPerObjMetric,
     UserQuerywiseMetric,
 
@@ -177,6 +179,7 @@ enum class ELossFunction {
     WKappa,
     LogLikelihoodOfPrediction,
     NormalizedGini,
+    PRAUC,
 
     /* pair metrics */
 
@@ -246,6 +249,12 @@ enum class EPreCalcShapValues {
     Auto,
     UsePreCalc,
     NoPreCalc
+};
+
+enum class ECalcTypeShapValues {
+    Approximate,
+    Regular,
+    Exact
 };
 
 enum class EObservationsToBootstrap {
@@ -330,6 +339,12 @@ enum class EFeatureCalcerType : ui32 {
     GaussianHomoscedasticModel,
     GaussianHeteroscedasticModel,
     EmbeddingDistanceToClass
+};
+
+enum class EAutoClassWeightsType {
+    Balanced,
+    SqrtBalanced,
+    None
 };
 
 namespace NCB {

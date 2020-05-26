@@ -1,6 +1,6 @@
 #include "iterator.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 Y_UNIT_TEST_SUITE(TIterator) {
     Y_UNIT_TEST(ToForwardIteratorTest) {
@@ -56,6 +56,6 @@ Y_UNIT_TEST_SUITE(TInputRangeAdaptor) {
            UNIT_ASSERT_VALUES_EQUAL(part, *expected_part);
            ++expected_part;
         }
-        UNIT_ASSERT(expected_part == expected.end())
+        UNIT_ASSERT(expected_part == expected.end());
     }
 }

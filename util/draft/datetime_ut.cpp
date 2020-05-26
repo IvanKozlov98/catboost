@@ -1,6 +1,6 @@
 #include "datetime.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 #include <util/string/builder.h>
 
@@ -54,11 +54,11 @@ Y_UNIT_TEST_SUITE(TSimpleTMTest) {
 
     Y_UNIT_TEST(TestLeap) {
         using namespace NDatetime;
-        UNIT_ASSERT(LeapYearAD(2000))
-        UNIT_ASSERT(LeapYearAD(2012))
-        UNIT_ASSERT(!LeapYearAD(1999))
-        UNIT_ASSERT(LeapYearAD(2004))
-        UNIT_ASSERT(!LeapYearAD(1900))
+        UNIT_ASSERT(LeapYearAD(2000));
+        UNIT_ASSERT(LeapYearAD(2012));
+        UNIT_ASSERT(!LeapYearAD(1999));
+        UNIT_ASSERT(LeapYearAD(2004));
+        UNIT_ASSERT(!LeapYearAD(1900));
     }
 
     Y_UNIT_TEST(TestYDayConversion) {

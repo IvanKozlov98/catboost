@@ -23,9 +23,9 @@
 
 #include <catboost/private/libs/options/binarization_options.h>
 
-#include <library/binsaver/bin_saver.h>
-#include <library/dbg_output/dump.h>
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/binsaver/bin_saver.h>
+#include <library/cpp/dbg_output/dump.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/generic/array_ref.h>
 #include <util/generic/maybe.h>
@@ -213,7 +213,8 @@ namespace NCB {
 
     private:
         friend class TQuantizationImpl;
-        friend class TRawBuilderDataHelper;
+        template <class TTObjectsDataProvider>
+        friend class TBuilderDataHelper;
 
     protected:
         TObjectsGroupingPtr ObjectsGrouping;
@@ -333,7 +334,13 @@ namespace NCB {
 
     private:
         friend class TQuantizationImpl;
-        friend class TRawBuilderDataHelper;
+        template <class TTObjectsDataProvider>
+        friend class TBuilderDataHelper;
+
+    private:
+        TData ExtractObjectData() {
+            return std::move(Data);
+        }
 
     private:
         TRawObjectsData Data;
@@ -456,18 +463,23 @@ namespace NCB {
 
     protected:
         friend class TObjectsSerialization;
+        template <class TTObjectsDataProvider>
+        friend class TBuilderDataHelper;
 
     protected:
         void SaveDataNonSharedPart(IBinSaver* binSaver) const {
             Data.SaveNonSharedPart(*GetFeaturesLayout(), binSaver);
         }
 
+        TData ExtractObjectData() {
+            return std::move(Data);
+        }
+
     protected:
         TQuantizedObjectsData Data;
     };
 
-    using TQuantizedObjectsDataProviderPtr = TIntrusivePtr<TQuantizedObjectsDataProvider>;
-
+    
     void DbgDumpQuantizedFeatures(
         const TQuantizedObjectsDataProvider& quantizedObjectsDataProvider,
         IOutputStream* out
@@ -695,6 +707,7 @@ namespace NCB {
             return PackedBinaryFeaturesData.PackedBinaryToSrcIndex[packedBinaryIndex.GetLinearIdx()];
         }
 
+        void CheckCPUTrainCompatibility() const;
 
         size_t GetExclusiveFeatureBundlesSize() const {
             return ExclusiveFeatureBundlesData.MetaData.size();
@@ -761,13 +774,10 @@ namespace NCB {
             return FeaturesGroupsData.FlatFeatureIndexToGroupPart[flatFeatureIdx];
         }
 
-        /* binary packs and bundles in *this are compatible with rhs
-         * useful for low-level compatibility (for example when calculating hashes by packs/bundles)
-         */
-        bool IsPackingCompatibleWith(const TQuantizedForCPUObjectsDataProvider& rhs) const;
-
     protected:
         friend class TObjectsSerialization;
+        template <class TTObjectsDataProvider>
+        friend class TBuilderDataHelper;
 
     protected:
         void SaveDataNonSharedPart(IBinSaver* binSaver) const {
@@ -779,13 +789,16 @@ namespace NCB {
             Data.SaveNonSharedPart(*GetFeaturesLayout(), binSaver);
         }
 
-    private:
-        void Check(
-            const TPackedBinaryFeaturesData& packedBinaryData,
-            const TExclusiveFeatureBundlesData& exclusiveFeatureBundlesData,
-            const TFeatureGroupsData& featuresGroupsData
-        ) const;
+        TData ExtractObjectData() {
+            TData result;
+            result.PackedBinaryFeaturesData = std::move(PackedBinaryFeaturesData);
+            result.ExclusiveFeatureBundlesData = std::move(ExclusiveFeatureBundlesData);
+            result.FeaturesGroupsData = std::move(FeaturesGroupsData);
+            result.Data = TQuantizedObjectsDataProvider::ExtractObjectData();
+            return result;
+        }
 
+    private:
         void CheckFeatureIsNotInAggregated(
             EFeatureType featureType,
             const TStringBuf featureTypeName,
@@ -801,6 +814,7 @@ namespace NCB {
         TVector<TCatFeatureUniqueValuesCounts> CatFeatureUniqueValuesCounts; // [catFeatureIdx]
     };
 
+    using TQuantizedObjectsDataProviderPtr = TIntrusivePtr<TQuantizedForCPUObjectsDataProvider>;
     using TQuantizedForCPUObjectsDataProviderPtr = TIntrusivePtr<TQuantizedForCPUObjectsDataProvider>;
 
 

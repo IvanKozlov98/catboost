@@ -8,7 +8,7 @@
 #include <catboost/libs/helpers/serialization.h>
 #include <catboost/libs/helpers/vector_helpers.h>
 
-#include <library/dbg_output/dump.h>
+#include <library/cpp/dbg_output/dump.h>
 
 #include <util/generic/cast.h>
 #include <util/generic/mapfindptr.h>
@@ -128,53 +128,6 @@ namespace NCB {
         );
 
         return 0;
-    }
-
-    bool TQuantizedFeaturesInfo::IsSupersetOf(const TQuantizedFeaturesInfo& rhs) const {
-        if (this == &rhs) { // shortcut
-            return true;
-        }
-        if (!FeaturesLayout->IsSupersetOf(*rhs.FeaturesLayout)) {
-            return false;
-        }
-        if (CommonFloatFeaturesBinarization != rhs.CommonFloatFeaturesBinarization) {
-            return false;
-        }
-
-        for (const auto& [floatFeatureIdx, binarization] : rhs.PerFloatFeatureQuantization) {
-            const auto it = PerFloatFeatureQuantization.find(floatFeatureIdx);
-            if (it == PerFloatFeatureQuantization.end()) {
-                if (binarization != CommonFloatFeaturesBinarization) {
-                    return false;
-                }
-            } else if (binarization != it->second) {
-                return false;
-            }
-        }
-
-        constexpr auto EPS = 1.e-6f;
-
-        for (const auto& [floatFeatureIdx, quantization] : rhs.Quantization) {
-            const auto it = Quantization.find(floatFeatureIdx);
-            if (it == Quantization.end()) {
-                return false;
-            }
-            if (!ApproximatelyEqual<float>(quantization.Borders, it->second.Borders, EPS)) {
-                return false;
-            }
-        }
-
-        for (const auto& [floatFeatureIdx, nanMode] : rhs.NanModes) {
-            const auto it = NanModes.find(floatFeatureIdx);
-            if (it == NanModes.end()) {
-                return false;
-            }
-            if (nanMode != it->second) {
-                return false;
-            }
-        }
-
-        return CatFeaturesPerfectHash.IsSupersetOf(rhs.CatFeaturesPerfectHash);
     }
 
     ENanMode TQuantizedFeaturesInfo::ComputeNanMode(const TFloatValuesHolder& feature) const {

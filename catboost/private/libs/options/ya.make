@@ -13,6 +13,7 @@ SRCS(
     class_label_options.cpp
     cross_validation_params.cpp
     data_processing_options.cpp
+    dataset_reading_params.cpp
     defaults_helper.cpp
     enum_helpers.cpp
     feature_eval_options.cpp
@@ -36,16 +37,16 @@ SRCS(
 )
 
 PEERDIR(
-    library/json
+    library/cpp/json
     catboost/libs/helpers
     catboost/libs/logging
     catboost/private/libs/ctr_description
     catboost/private/libs/data_util
-    library/getopt/small
+    library/cpp/getopt/small
     library/cpp/grid_creator
-    library/json
-    library/text_processing/dictionary
-    library/text_processing/tokenizer
+    library/cpp/json
+    library/cpp/text_processing/dictionary
+    library/cpp/text_processing/tokenizer
 )
 
 GENERATE_ENUM_SERIALIZATION(enums.h)

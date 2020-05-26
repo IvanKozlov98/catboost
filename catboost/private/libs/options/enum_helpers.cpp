@@ -212,7 +212,13 @@ MakeRegister(LossInfos,
         EMetricAttribute::IsBinaryClassCompatible
         | EMetricAttribute::IsGroupwise
     ),
+    RankingRegistree(StochasticRank, ERankingType::Order,
+        EMetricAttribute::IsGroupwise
+    ),
     Registree(PythonUserDefinedPerObject,
+        EMetricAttribute::IsUserDefined
+    ),
+    Registree(PythonUserDefinedMultiRegression,
         EMetricAttribute::IsUserDefined
     ),
     Registree(UserPerObjMetric,
@@ -231,6 +237,10 @@ MakeRegister(LossInfos,
         EMetricAttribute::IsRegression
     ),
     Registree(AUC,
+        EMetricAttribute::IsBinaryClassCompatible
+        | EMetricAttribute::IsMultiClassCompatible
+    ),
+    Registree(PRAUC,
         EMetricAttribute::IsBinaryClassCompatible
         | EMetricAttribute::IsMultiClassCompatible
     ),
@@ -433,7 +443,8 @@ static const TVector<ELossFunction> RegressionObjectives = {
 };
 
 static const TVector<ELossFunction> MultiRegressionObjectives = {
-    ELossFunction::MultiRMSE
+    ELossFunction::MultiRMSE,
+    ELossFunction::PythonUserDefinedMultiRegression
 };
 
 static const TVector<ELossFunction> ClassificationObjectives = {
@@ -452,6 +463,7 @@ static const TVector<ELossFunction> RankingObjectives = {
     ELossFunction::QuerySoftMax,
     ELossFunction::QueryCrossEntropy,
     ELossFunction::StochasticFilter,
+    ELossFunction::StochasticRank,
     ELossFunction::UserPerObjMetric,
     ELossFunction::UserQuerywiseMetric,
     ELossFunction::Combination

@@ -35,6 +35,9 @@ namespace NCB {
         double alpha,
         double delta
     ) {
+        if (target.empty()) {
+            return 0;
+        }
         const TVector<float> defaultWeights(target.size(), 1);
         const auto weightsRef = weights.empty() ? MakeConstArrayRef(defaultWeights) : weights;
         double q = CalcSampleQuantile(target, weightsRef, alpha);
@@ -94,7 +97,7 @@ namespace NCB {
             }
             case ELossFunction::Quantile:
             case ELossFunction::MAE: {
-                const auto& params = lossDescription.GetLossParams();
+                const auto& params = lossDescription.GetLossParamsMap();
                 auto it = params.find("alpha");
                 double alpha = it == params.end() ? 0.5 : FromString<double>(it->second);
                 it = params.find("delta");

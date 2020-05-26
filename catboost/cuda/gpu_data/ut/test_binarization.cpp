@@ -13,7 +13,7 @@
 #include <catboost/private/libs/quantization/grid_creator.h>
 #include <catboost/private/libs/quantization/utils.h>
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 using namespace std;
 using namespace NCatboostCuda;
@@ -81,14 +81,14 @@ Y_UNIT_TEST_SUITE(BinarizationsTests) {
                 if (featuresManager.IsFloat(featureId)) {
                     const auto floatFeatureIdx = dataProvider.MetaInfo.FeaturesLayout->GetInternalFeatureIdx<EFeatureType::Float>(featureId);
                     auto& valuesHolder = **(dataProvider.ObjectsData->GetFloatFeature(*floatFeatureIdx));
-                    auto binsArray = valuesHolder.ExtractValues(&NPar::LocalExecutor());
-                    bins.assign((*binsArray).begin(), (*binsArray).end());
+                    auto binsArray = valuesHolder.template ExtractValues<ui16>(&NPar::LocalExecutor());
+                    bins.assign(binsArray.begin(), binsArray.end());
                     binarization = dataProvider.ObjectsData->GetQuantizedFeaturesInfo()->GetBinCount(floatFeatureIdx);
                 } else if (featuresManager.IsCat(featureId)) {
                     const auto catFeatureIdx = dataProvider.MetaInfo.FeaturesLayout->GetInternalFeatureIdx<EFeatureType::Categorical>(featureId);
                     auto& valuesHolder = **(dataProvider.ObjectsData->GetCatFeature(*catFeatureIdx));
-                    auto binsArray = valuesHolder.ExtractValues(&NPar::LocalExecutor());
-                    bins.assign((*binsArray).begin(), (*binsArray).end());
+                    auto binsArray = valuesHolder.template ExtractValues<ui32>(&NPar::LocalExecutor());
+                    bins.assign(binsArray.begin(), binsArray.end());
                     binarization = dataProvider.ObjectsData->GetQuantizedFeaturesInfo()->GetUniqueValuesCounts(catFeatureIdx).OnAll;
                 } else {
                     CB_ENSURE(featuresManager.IsCtr(featureId));
@@ -98,8 +98,8 @@ Y_UNIT_TEST_SUITE(BinarizationsTests) {
                     const ui32 catFeatureFlatIdx = ctr.FeatureTensor.GetCatFeatures()[0];
                     const auto catFeatureIdx = dataProvider.MetaInfo.FeaturesLayout->GetInternalFeatureIdx<EFeatureType::Categorical>(catFeatureFlatIdx);
                     auto& valuesHolder = **(dataProvider.ObjectsData->GetCatFeature(*catFeatureIdx));
-                    auto binsArray = valuesHolder.ExtractValues(&NPar::LocalExecutor());
-                    TVector<ui32> catFeatureBins((*binsArray).begin(), (*binsArray).end());
+                    auto binsArray = valuesHolder.ExtractValues<ui32>(&NPar::LocalExecutor());
+                    TVector<ui32> catFeatureBins(binsArray.begin(), binsArray.end());
                     const auto& borders = featuresManager.GetBorders(featureId);
                     binarization = borders.size() + 1;
 
@@ -243,7 +243,8 @@ Y_UNIT_TEST_SUITE(BinarizationsTests) {
                 desc,
                 docsMapping,
                 features,
-                MakeAtomicShared<NCB::TFeaturesArraySubsetIndexing>(
+                TDatasetPermutationOrderAndSubsetIndexing::ConstructShared(
+                    dataProvider->ObjectsData->GetFeaturesArraySubsetIndexing(),
                     std::move(order)
                 )
             );
@@ -254,6 +255,7 @@ Y_UNIT_TEST_SUITE(BinarizationsTests) {
                                                           builder,
                                                           *dataProvider,
                                                           id,
+                                                          /*skipExclusiveFeatureBundles*/false,
                                                           &NPar::LocalExecutor());
             writer.Write(features);
             builder.Finish();

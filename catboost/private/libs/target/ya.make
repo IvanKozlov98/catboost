@@ -7,6 +7,7 @@ SRCS(
     classification_target_helper.cpp
     data_providers.cpp
     target_converter.cpp
+    calc_class_weights.cpp
 )
 
 PEERDIR(
@@ -18,7 +19,7 @@ PEERDIR(
     catboost/libs/metrics
     catboost/private/libs/options
     catboost/private/libs/pairs
-    library/json
+    library/cpp/json
 )
 
 END()

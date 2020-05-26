@@ -2,14 +2,13 @@ import sys
 from copy import deepcopy
 from six import iteritems, string_types, integer_types
 import os
-import imp
 
 if sys.version_info >= (3, 3):
     from collections.abc import Iterable, Sequence, Mapping, MutableMapping
 else:
     from collections import Iterable, Sequence, Mapping, MutableMapping
 
-from abc import ABCMeta, abstractmethod
+from collections import OrderedDict
 
 import warnings
 import numpy as np
@@ -38,30 +37,11 @@ except ImportError:
 import scipy.sparse
 
 
-def get_so_paths(dir_name):
-    dir_name = os.path.join(os.path.dirname(__file__), dir_name)
-    list_dir = os.listdir(dir_name) if os.path.isdir(dir_name) else []
-    return [os.path.join(dir_name, so_name) for so_name in list_dir if so_name.split('.')[-1] in ['so', 'pyd']]
-
-
-def get_catboost_bin_module():
-    if '_catboost' in sys.modules:
-        return sys.modules['_catboost']
-    so_paths = get_so_paths('./')
-    for so_path in so_paths:
-        try:
-            loaded_catboost = imp.load_dynamic('_catboost', so_path)
-            sys.modules['catboost._catboost'] = loaded_catboost
-            return loaded_catboost
-        except ImportError:
-            pass
-    from . import _catboost
-    return _catboost
-
-
 _typeof = type
 
-_catboost = get_catboost_bin_module()
+from . import _catboost
+
+
 _PoolBase = _catboost._PoolBase
 _CatBoost = _catboost._CatBoost
 _MetricCalcerBase = _catboost._MetricCalcerBase
@@ -83,7 +63,8 @@ _NumpyAwareEncoder = _catboost._NumpyAwareEncoder
 FeaturesData = _catboost.FeaturesData
 _have_equal_features = _catboost._have_equal_features
 SPARSE_MATRIX_TYPES = _catboost.SPARSE_MATRIX_TYPES
-MultiLabelCustomMetric = _catboost.MultiLabelCustomMetric
+MultiRegressionCustomMetric = _catboost.MultiRegressionCustomMetric
+MultiRegressionCustomObjective = _catboost.MultiRegressionCustomObjective
 
 
 from contextlib import contextmanager  # noqa E402
@@ -157,7 +138,6 @@ def _process_verbose(metric_period=None, verbose=None, logging_level=None, verbo
         elif verbose_eval is not None:
             verbose = verbose_eval
     if verbose is not None:
-        logging_level = 'Verbose' if verbose else 'Silent'
         verbose = int(verbose)
 
     return (metric_period, verbose, logging_level)
@@ -213,6 +193,73 @@ def _get_features_indices(features, feature_names):
                 raise CatBoostError("features parameter contains string value '{}' but feature names "
                                     "for a dataset are not specified".format(f))
     return features
+
+
+def _update_params_quantize_part(params, ignored_features, per_float_feature_quantization, border_count,
+                                 feature_border_type, sparse_features_conflict_fraction, dev_efb_max_buckets,
+                                 nan_mode, input_borders, task_type, used_ram_limit, random_seed,
+                                 dev_max_subset_size_for_build_borders):
+    if ignored_features is not None:
+        params.update({
+            'ignored_features': ignored_features
+        })
+
+    if per_float_feature_quantization is not None:
+        params.update({
+            'per_float_feature_quantization': per_float_feature_quantization
+        })
+
+    if border_count is not None:
+        params.update({
+            'border_count': border_count
+        })
+
+    if feature_border_type is not None:
+        params.update({
+            'feature_border_type': feature_border_type
+        })
+
+    if sparse_features_conflict_fraction is not None:
+        params.update({
+            'sparse_features_conflict_fraction': sparse_features_conflict_fraction
+        })
+
+    if dev_efb_max_buckets is not None:
+        params.update({
+            'dev_efb_max_buckets': dev_efb_max_buckets
+        })
+
+    if nan_mode is not None:
+        params.update({
+            'nan_mode': nan_mode
+        })
+
+    if input_borders is not None:
+        params.update({
+            'input_borders': input_borders
+        })
+
+    if task_type is not None:
+        params.update({
+            'task_type': task_type
+        })
+
+    if used_ram_limit is not None:
+        params.update({
+            'used_ram_limit': used_ram_limit
+        })
+
+    if random_seed is not None:
+        params.update({
+            'random_seed': random_seed
+        })
+
+    if dev_max_subset_size_for_build_borders is not None:
+        params.update({
+            'dev_max_subset_size_for_build_borders': dev_max_subset_size_for_build_borders
+        })
+
+    return params
 
 
 class Pool(_PoolBase):
@@ -672,8 +719,8 @@ class Pool(_PoolBase):
         self._save(fname)
 
     def quantize(self, ignored_features=None, per_float_feature_quantization=None, border_count=None,
-                 max_bin=None, feature_border_type=None, sparse_features_conflict_fraction=None, dev_efb_max_buckets=None,
-                 nan_mode=None, input_borders=None, task_type=None, used_ram_limit=None):
+                 max_bin=None, feature_border_type=None, sparse_features_conflict_fraction=None,
+                 nan_mode=None, input_borders=None, task_type=None, used_ram_limit=None, random_seed=None, **kwargs):
         """
         Quantize this pool
 
@@ -713,10 +760,6 @@ class Pool(_PoolBase):
             CPU only. Maximum allowed fraction of conflicting non-default values for features in exclusive features bundle.
             Should be a real value in [0, 1) interval.
 
-        dev_efb_max_buckets : int, [default=1024]
-            CPU only. Maximum bucket count in exclusive features bundle. Should be in an integer between 0 and 65536.
-            Used only for learning speed tuning.
-
         nan_mode : string, [default=None]
             Way to process missing values for numeric features.
             Possible values:
@@ -735,6 +778,10 @@ class Pool(_PoolBase):
                 - 'GPU'
 
         used_ram_limit=None
+
+        random_seed : int, [default=None]
+            The random seed used for data sampling.
+            If None, 0 is used.
         """
         if self.is_quantized():
             raise CatBoostError('Pool is already quantized')
@@ -745,67 +792,18 @@ class Pool(_PoolBase):
         if border_count is None:
             border_count = max_bin
 
-        self._update_params_quantize_part(params, ignored_features, per_float_feature_quantization, border_count,
-                                          feature_border_type, sparse_features_conflict_fraction, dev_efb_max_buckets,
-                                          nan_mode, input_borders, task_type, used_ram_limit)
+        dev_efb_max_buckets = kwargs.pop('dev_efb_max_buckets', None)
+        dev_max_subset_size_for_build_borders = kwargs.pop('dev_max_subset_size_for_build_borders', None)
+
+        if kwargs:
+            raise CatBoostError("got an unexpected keyword arguments: {}".format(kwargs.keys()))
+
+        _update_params_quantize_part(params, ignored_features, per_float_feature_quantization, border_count,
+                                     feature_border_type, sparse_features_conflict_fraction, dev_efb_max_buckets,
+                                     nan_mode, input_borders, task_type, used_ram_limit, random_seed,
+                                     dev_max_subset_size_for_build_borders)
 
         self._quantize(params)
-
-
-
-    def _update_params_quantize_part(self, params, ignored_features, per_float_feature_quantization, border_count,
-                                     feature_border_type, sparse_features_conflict_fraction, dev_efb_max_buckets,
-                                     nan_mode, input_borders, task_type, used_ram_limit):
-        if ignored_features is not None:
-            params.update({
-                'ignored_features': ignored_features
-            })
-
-        if per_float_feature_quantization is not None:
-            params.update({
-                'per_float_feature_quantization': per_float_feature_quantization
-            })
-
-        if border_count is not None:
-            params.update({
-                'border_count': border_count
-            })
-
-        if feature_border_type is not None:
-            params.update({
-                'feature_border_type': feature_border_type
-            })
-
-        if sparse_features_conflict_fraction is not None:
-            params.update({
-                'sparse_features_conflict_fraction': sparse_features_conflict_fraction
-            })
-
-        if dev_efb_max_buckets is not None:
-            params.update({
-                'dev_efb_max_buckets': dev_efb_max_buckets
-            })
-
-        if nan_mode is not None:
-            params.update({
-                'nan_mode': nan_mode
-            })
-
-        if input_borders is not None:
-            params.update({
-                'input_borders': input_borders
-            })
-
-        if task_type is not None:
-            params.update({
-                'task_type': task_type
-            })
-
-        if used_ram_limit is not None:
-            params.update({
-                'used_ram_limit': used_ram_limit
-            })
-
 
     def _if_pandas_to_numpy(self, array):
         if isinstance(array, Series):
@@ -829,7 +827,8 @@ class Pool(_PoolBase):
         feature_names_path,
         delimiter,
         has_header,
-        thread_count
+        thread_count,
+        quantization_params=None
     ):
         """
         Read Pool from file.
@@ -853,7 +852,8 @@ class Pool(_PoolBase):
                 feature_names_path,
                 delimiter[0],
                 has_header,
-                thread_count
+                thread_count,
+                quantization_params
             )
 
     def _init(
@@ -1028,10 +1028,31 @@ def _process_synonyms(params):
     if 'scale_pos_weight' in params:
         if 'loss_function' in params and params['loss_function'] != 'Logloss':
                 raise CatBoostError('scale_pos_weight is supported only for binary classification Logloss loss')
-        if 'class_weights' in params:
-            raise CatBoostError('only one of the parameters scale_pos_weight, class_weights should be initialized.')
+        if 'class_weights' in params or 'auto_class_weights' in params:
+            raise CatBoostError('only one of the parameters scale_pos_weight, class_weights, auto_class_weights should be initialized.')
         params['class_weights'] = [1.0, params['scale_pos_weight']]
         del params['scale_pos_weight']
+    if ('class_weights' in params) and isinstance(params['class_weights'], (dict, OrderedDict)):
+        class_weights_dict = params['class_weights']
+        class_weights_list = []
+        if ('class_names' in params) and (params['class_names'] is not None):
+            if len(class_weights_dict) != len(params['class_names']):
+                raise CatBoostError('Number of classes in class_names and class_weights differ')
+            for class_label in params['class_names']:
+                if class_label not in class_weights_dict:
+                    raise CatBoostError(
+                        'class "{}" is present in "class_names" but not in "class_weights" dictionary'.format(
+                            class_label
+                        )
+                    )
+                class_weights_list.append(class_weights_dict[class_label])
+        else:
+            class_labels_list = []
+            for class_label, class_weight in class_weights_dict.items():
+                class_labels_list.append(class_label)
+                class_weights_list.append(class_weight)
+            params['class_names'] = class_labels_list
+        params['class_weights'] = class_weights_list
 
     _process_synonyms_groups(params)
 
@@ -1267,8 +1288,9 @@ class _CatBoostBase(object):
         metrics_description_list = metrics_description if isinstance(metrics_description, list) else [metrics_description]
         return self._object._base_eval_metrics(pool, metrics_description_list, ntree_start, ntree_end, eval_period, thread_count, result_dir, tmp_dir)
 
-    def _calc_fstr(self, type, pool, thread_count, verbose, shap_mode, interaction_indices):
-        return self._object._calc_fstr(type.name, pool, thread_count, verbose, shap_mode, interaction_indices)
+    def _calc_fstr(self, type, pool, thread_count, verbose, shap_mode, interaction_indices, shap_calc_type):
+        return self._object._calc_fstr(type.name, pool, thread_count, verbose, shap_mode, interaction_indices,
+                                       shap_calc_type)
 
     def _calc_ostr(self, train_pool, test_pool, top_size, ostr_type, update_method, importance_values_sign, thread_count, verbose):
         return self._object._calc_ostr(train_pool, test_pool, top_size, ostr_type, update_method, importance_values_sign, thread_count, verbose)
@@ -1436,6 +1458,32 @@ class _CatBoostBase(object):
         '''
         self._object._set_feature_names(feature_names)
 
+
+    def _get_tags(self):
+        tags = {
+            'requires_positive_X': False,
+            'requires_positive_y': False,
+            'requires_y': True,
+            'poor_score': False,
+            'no_validation': True,
+            'stateless': False,
+            'multilabel': False,
+            '_skip_test': False,
+            'multioutput_only': False,
+            'binary_only': False,
+            'requires_fit': True}
+
+        params = deepcopy(self._init_params)
+        if params is None:
+            params = {}
+        _process_synonyms(params)
+
+        tags['non_deterministic'] = 'task_type' in params and params['task_type'] == 'GPU'
+        tags['multioutput'] = 'loss_function' in params and params['loss_function'] == 'MultiRMSE'
+        tags['allow_nan'] = 'nan_mode' not in params or params['nan_mode'] != 'Forbidden'
+
+        return tags
+
     def get_scale_and_bias(self):
         return self._object._get_scale_and_bias()
 
@@ -1472,6 +1520,9 @@ def _check_param_types(params):
     if 'first_feature_use_penalties' in params:
         if not isinstance(params['first_feature_use_penalties'], STRING_TYPES + ARRAY_TYPES + (dict,)):
             raise CatBoostError("Invalid `first_feature_use_penalties` type={} : must be string or list of floats or dict.".format(type(param)))
+    if 'per_object_feature_penalties' in params:
+        if not isinstance(params['per_object_feature_penalties'], STRING_TYPES + ARRAY_TYPES + (dict,)):
+            raise CatBoostError("Invalid `per_object_feature_penalties` type={} : must be string or list of floats or dict.".format(type(param)))
 
 
 def _params_type_cast(params):
@@ -1972,7 +2023,7 @@ class CatBoost(_CatBoostBase):
     def _iterate_leaf_indexes(self, data, ntree_start, ntree_end):
         if ntree_end == 0:
             ntree_end = self.tree_count_
-        data, _ = self._process_predict_input_data(data, "iterate_leaf_indexes", thread_count)
+        data, _ = self._process_predict_input_data(data, "iterate_leaf_indexes", thread_count=-1)
         leaf_indexes_iterator = self._leaf_indexes_iterator(data, ntree_start, ntree_end)
         for leaf_index in leaf_indexes_iterator:
             yield leaf_index
@@ -2206,7 +2257,7 @@ class CatBoost(_CatBoostBase):
         else:
             return np.array(getattr(self, "_prediction_values_change", None))
 
-    def get_feature_importance(self, data=None, type=EFstrType.FeatureImportance, prettified=False, thread_count=-1, verbose=False, fstr_type=None, shap_mode="Auto", interaction_indices=None):
+    def get_feature_importance(self, data=None, type=EFstrType.FeatureImportance, prettified=False, thread_count=-1, verbose=False, fstr_type=None, shap_mode="Auto", interaction_indices=None, shap_calc_type="Regular"):
         """
         Parameters
         ----------
@@ -2263,6 +2314,17 @@ class CatBoost(_CatBoostBase):
                 - "NoPreCalc"
                     Use direct SHAP Values calculation calculation with complexity O(NTLD^2). Direct algorithm
                     is faster when N < L (algorithm from https://arxiv.org/abs/1802.03888)
+
+        shap_calc_type : string, optional (default="Regular")
+            used only for ShapValues type
+            Possible values:
+                - "Regular"
+                    Calculate regular SHAP values
+                - "Approximate"
+                    Calculate approximate SHAP values
+                - "Exact"
+                    Calculate exact SHAP values
+
         interaction_indices : list of int or string (feature_idx_1, feature_idx_2), optional (default=None)
             used only for ShapInteractionValues type
             Calculate SHAP Interaction Values between pair of features feature_idx_1 and feature_idx_2 for every object
@@ -2332,7 +2394,8 @@ class CatBoost(_CatBoostBase):
                 raise CatBoostError("data is empty.")
 
         with log_fixup():
-            fstr, feature_names = self._calc_fstr(type, data, thread_count, verbose, shap_mode, interaction_indices)
+            fstr, feature_names = self._calc_fstr(type, data, thread_count, verbose, shap_mode, interaction_indices,
+                                                  shap_calc_type)
         if type in (EFstrType.PredictionValuesChange, EFstrType.LossFunctionChange, EFstrType.PredictionDiff):
             feature_importances = [value[0] for value in fstr]
             attribute_name = None
@@ -2726,6 +2789,119 @@ class CatBoost(_CatBoostBase):
 
         return all_predictions, figs
 
+    def plot_partial_dependence(self, data, features, plot=True, plot_file=None, thread_count=-1):
+        """
+        To use this function, you should install plotly.
+        data: numpy.ndarray or pandas.DataFrame or catboost.Pool
+        features: int, str, list<int>, tuple<int>, list<string>, tuple<string>
+            Float features to calculate partial dependence for. Number of features should be 1 or 2.
+        plot: bool
+            Plot predictions.
+        plot_file: str
+            Output file for plot predictions.
+        thread_count: int
+            Number of threads to use. If -1 use maximum available number of threads.
+        Returns
+        -------
+            If number of features is one - 1d numpy array and figure with line plot.
+            If number of features is two - 2d numpy array and figure with 2d heatmap.
+        """
+
+        try:
+            import plotly.graph_objs as go
+        except ImportError as e:
+            warnings.warn("To draw plots you should install plotly.")
+            raise ImportError(str(e))
+
+        def getFeatureIdx(feature):
+            if not isinstance(feature, int):
+                if self.feature_names_ is None or feature not in self.feature_names_:
+                    raise CatBoostError('No feature named "{}" in model'.format(feature))
+                feature_idx = self.feature_names_.index(feature)
+            else:
+                feature_idx = feature
+            assert feature_idx in self._get_borders(), "only float features indexes are supported"
+            assert len(self._get_borders()[feature_idx]) > 0, "feature with idx {} is not used in model".format(feature_idx)
+            return feature_idx
+
+        def getFeatureIndices(features):
+            if isinstance(features, list) or isinstance(features, tuple):
+                features_idxs = [getFeatureIdx(feature) for feature in features]
+            elif isinstance(features, int) or isinstance(features, str):
+                features_idxs = [getFeatureIdx(features)]
+            else:
+                raise CatBoostError('Unsupported type for argument \'features\'. Must be one of: int, string, list<string>, list<int>, tuple<int>, tuple<string>')
+            return features_idxs
+
+        def getAxisParams(borders, feature_name=None):
+            return {
+                'title': 'Bins' if feature_name is None else 'Bins of feature \'{}\''.format(feature_name),
+                'tickmode': 'array',
+                'tickvals': list(range(len(borders) + 1)),
+                'ticktext': ['(-inf, {:.4f}]'.format(borders[0])] +
+                            ['({:.4f}, {:.4f}]'.format(val_1, val_2)
+                            for val_1, val_2 in zip(borders[:-1], borders[1:])] +
+                            ['({:.4f}, +inf)'.format(borders[-1])],
+                'showticklabels': False}
+
+        def plot2d(feature_names, borders, predictions):
+            xaxis = go.layout.XAxis(**getAxisParams(borders[1], feature_name=feature_names[1]))
+            yaxis = go.layout.YAxis(**getAxisParams(borders[0], feature_name=feature_names[0]))
+            layout = go.Layout(
+                title='Partial dependence plot for features {}'.format('\'{}\''.format('\', \''.join(map(str, feature_names)))),
+                yaxis=yaxis,
+                xaxis=xaxis
+            )
+            fig = go.Figure(data=go.Heatmap(z=predictions), layout=layout)
+            return fig
+
+        def plot1d(feature, borders, predictions):
+            xaxis = go.layout.XAxis(**getAxisParams(borders))
+            yaxis = {
+                'title': 'Mean Prediction',
+                'side': 'left'
+            }
+            layout = go.Layout(
+                title="Partial dependence plot for feature '{}'".format(feature),
+                yaxis=yaxis,
+                xaxis=xaxis
+            )
+            fig = go.Figure(data=go.Scatter(y=predictions, mode='lines+markers'), layout=layout)
+            return fig
+
+        features_idx = getFeatureIndices(features)
+        borders = [self._get_borders()[idx] for idx in features_idx]
+        if len(features_idx) not in [1, 2]:
+            raise CatBoostError('Number of \'features\' should be 1 or 2, got {}'.format(len(features_idx)))
+        is_2d_plot = len(features_idx) == 2
+
+        data, _ = self._process_predict_input_data(data, "plot_partial_dependence", thread_count=thread_count)
+        all_predictions = np.array(self._object._calc_partial_dependence(data, features_idx, thread_count))
+
+        if is_2d_plot:
+            all_predictions = all_predictions.reshape(map(lambda x: len(x) + 1, borders))
+            fig = plot2d(features_idx, borders,  all_predictions)
+        else:
+            fig = plot1d(features_idx[0], borders[0], all_predictions)
+
+        if plot:
+            try:
+                from plotly.offline import iplot
+                from plotly.offline import init_notebook_mode
+                init_notebook_mode(connected=True)
+            except ImportError as e:
+                warn_msg = "To draw plots you should install plotly."
+                warnings.warn(warn_msg)
+                raise ImportError(str(e))
+            iplot(fig)
+
+        if plot_file:
+            _save_plot_file(plot_file, "Partial dependence plot for features '{}'".format(features), fig)
+
+
+        return all_predictions, fig
+
+
     def calc_feature_statistics(self, data, target=None, feature=None, prediction_type=None,
                                 cat_feature_values=None, plot=True, max_cat_features_on_plot=10,
                                 thread_count=-1, plot_file=None):
@@ -2997,7 +3173,7 @@ class CatBoost(_CatBoostBase):
         return graph
 
     def plot_tree(self, tree_idx, pool=None):
-        pool, _ = self._process_predict_input_data(pool, "plot_tree", thread_count) if pool is not None else (None, None)
+        pool, _ = self._process_predict_input_data(pool, "plot_tree", thread_count=-1) if pool is not None else (None, None)
 
         splits = self._get_tree_splits(tree_idx, pool)
         leaf_values = self._get_tree_leaf_values(tree_idx)
@@ -3074,7 +3250,7 @@ class CatBoost(_CatBoostBase):
                 fold_count, partition_random_seed, shuffle, stratified, train_size,
                 search_by_train_test_split, calc_cv_statistics, custom_folds, verbose
             )
-        
+
         if refit:
             if self.is_fitted():
                 raise CatBoostError("Model was fitted before hyperparameters tuning. You can't change hyperparameters of fitted model.")
@@ -3452,11 +3628,17 @@ class CatBoostClassifier(CatBoost):
         should be smaller than the given value.
         If several of 'classes_count', 'class_weights', 'class_names' parameters are defined
         the numbers of classes specified by each of them must be equal.
-    class_weights : list of floats, [default=None]
+    class_weights : list or dict, [default=None]
         Classes weights. The values are used as multipliers for the object weights.
         If None, all classes are supposed to have weight one.
+        If list - class weights in order of class_names or sequential classes if class_names is undefined
+        If dict - dict of class_name -> class_weight.
         If several of 'classes_count', 'class_weights', 'class_names' parameters are defined
         the numbers of classes specified by each of them must be equal.
+    auto_class_weights : string [default=None]
+        Enables automatic class weights calculation. Possible values:
+            - Balanced  # weight = maxSummaryClassWeight / summaryClassWeight, statistics determined from train pool
+            - SqrtBalanced  # weight = sqrt(maxSummaryClassWeight / summaryClassWeight)
     class_names: list of strings, [default=None]
         Class names. Allows to redefine the default values for class labels (integer numbers).
         If several of 'classes_count', 'class_weights', 'class_names' parameters are defined
@@ -3536,15 +3718,18 @@ class CatBoostClassifier(CatBoost):
 
     monotone_constraints : list or numpy.ndarray or string or dict, [default=None]
         Monotone constraints for features.
-        
+
     feature_weights : list or numpy.ndarray or string or dict, [default=None]
         Coefficient to multiply split gain with specific feature use. Should be non-negative.
-    
+
     penalties_coefficient : float, [default=1]
         Common coefficient for all penalties. Should be non-negative.
-        
+
     first_feature_use_penalties : list or numpy.ndarray or string or dict, [default=None]
         Penalties to first use of specific feature in model. Should be non-negative.
+
+    per_object_feature_penalties : list or numpy.ndarray or string or dict, [default=None]
+        Penalties for first use of feature for each object. Should be non-negative.
 
     sampling_frequency : string, [default=PerTree]
         Frequency to sample weights and objects when building trees.
@@ -3750,6 +3935,7 @@ class CatBoostClassifier(CatBoost):
         target_border=None,
         classes_count=None,
         class_weights=None,
+        auto_class_weights=None,
         class_names=None,
         one_hot_max_size=None,
         random_strength=None,
@@ -3815,6 +4001,7 @@ class CatBoostClassifier(CatBoost):
         feature_weights=None,
         penalties_coefficient=None,
         first_feature_use_penalties=None,
+        per_object_feature_penalties=None,
         model_shrink_rate=None,
         model_shrink_mode=None,
         langevin=None,
@@ -4368,6 +4555,7 @@ class CatBoostRegressor(CatBoost):
         feature_weights=None,
         penalties_coefficient=None,
         first_feature_use_penalties=None,
+        per_object_feature_penalties=None,
         model_shrink_rate=None,
         model_shrink_mode=None,
         langevin=None,
@@ -4516,8 +4704,9 @@ class CatBoostRegressor(CatBoost):
             # TODO(ilyzhin) change on get_all_params after MLTOOLS-4758
             params = deepcopy(self._init_params)
             _process_synonyms(params)
-            if 'loss_function' in params:
-                if 'Poisson' in params['loss_function'] or 'Tweedie' in params['loss_function']:
+            loss_function = params.get('loss_function')
+            if loss_function and isinstance(loss_function, str):
+                if loss_function.startswith('Poisson') or loss_function.startswith('Tweedie'):
                     prediction_type = 'Exponent'
         return self._predict(data, prediction_type, ntree_start, ntree_end, thread_count, verbose, 'predict')
 
@@ -4842,6 +5031,9 @@ def cv(pool=None, params=None, dtrain=None, iterations=None, num_boost_round=Non
     _process_synonyms(params)
 
     metric_period, verbose, logging_level = _process_verbose(metric_period, verbose, logging_level, verbose_eval)
+
+    if 'loss_function' not in params:
+        raise CatBoostError("Parameter loss_function should be specified for cross-validation")
 
     if any(v is not None for v in [fold_count,nfold]) and folds is not None:
         raise CatBoostError(

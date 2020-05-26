@@ -43,7 +43,14 @@ namespace NCatboostCuda {
                 return GetFoldsCount(featureId) * 1.0 / 256;
             }
 
-            bool IsOneHot(ui32) const {
+            bool IsEffectivelyOneHot(ui32) const {
+                return false;
+            }
+            bool SkipInSplitSearch(ui32) const {
+                return false;
+            }
+
+            bool SkipFirstBucketInOneHot(ui32) const {
                 return false;
             }
 
@@ -102,6 +109,8 @@ namespace NCatboostCuda {
 
         void VisitPermutationDataSets(ui32 permutationId,
                                       TDataSetVisitor& visitor);
+
+        ui32 GetMaxUniqueValues() const;
 
     private:
         void AddDataSets(const TVector<TTreeCtrDataSetPtr>& dataSets, ui32 permutationId, bool withCompressedIndexFlag,

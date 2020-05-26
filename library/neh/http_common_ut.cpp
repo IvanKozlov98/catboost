@@ -2,7 +2,7 @@
 #include "http_common.h"
 #include "http_headers.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 Y_UNIT_TEST_SUITE(THttpCommon) {
     Y_UNIT_TEST(TCheckRequestFlags) {
@@ -391,5 +391,22 @@ Y_UNIT_TEST_SUITE(THttpCommon) {
         };
 
         UNIT_ASSERT_VALUES_EQUAL(i, expected.size());
+    }
+
+
+    Y_UNIT_TEST(TMakeFullProxyRequest) {
+        {
+            NNeh::TMessage msg = NNeh::TMessage::FromString("http://localhost:3380/ntables");
+            UNIT_ASSERT(NNeh::NHttp::MakeFullProxyRequest(msg, "http://proxyhost:4242", "", ""));
+            UNIT_ASSERT_VALUES_EQUAL(msg.Addr, "full://proxyhost:4242");
+            UNIT_ASSERT(msg.Data.StartsWith("GET http://localhost:3380/ntables HTTP/1.1"));
+        }
+
+        {
+            NNeh::TMessage msg = NNeh::TMessage::FromString("https://localhost:3380/ntables");
+            UNIT_ASSERT(NNeh::NHttp::MakeFullProxyRequest(msg, "http://proxyhost:4242", "", ""));
+            UNIT_ASSERT_VALUES_EQUAL(msg.Addr, "full://proxyhost:4242");
+            UNIT_ASSERT(msg.Data.StartsWith("GET https://localhost:3380/ntables HTTP/1.1"));
+        }
     }
 }

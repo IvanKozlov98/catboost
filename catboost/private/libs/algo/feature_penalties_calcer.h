@@ -12,8 +12,9 @@ class TFold;
 
 namespace NCB {
     void AddFeaturePenaltiesToBestSplits(
-        TLearnContext* ctx,
-        const TTrainingForCPUDataProviders& trainingData,
+        const TVector<TIndexType>& leaves,
+        const TLearnContext& ctx,
+        const TTrainingDataProviders& trainingData,
         const TFold& fold,
         ui32 oneHotMaxSize,
         TVector<TCandidateInfo>* candidates

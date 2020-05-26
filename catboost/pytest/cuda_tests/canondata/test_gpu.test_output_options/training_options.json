@@ -27,11 +27,11 @@
     "metrics" : {
         "objective_metric" : {
             "type" : "Logloss",
-            "params" : { }
+            "params" : [ ]
         },
         "eval_metric" : {
             "type" : "Logloss",
-            "params" : { }
+            "params" : [ ]
         },
         "custom_metrics" : [ ]
     },
@@ -145,8 +145,10 @@
         "class_weights" : [ ],
         "target_border" : null,
         "dev_sparse_array_indexing" : "Indices",
+        "auto_class_weights" : "None",
         "float_features_binarization" : {
             "border_count" : 128,
+            "dev_max_subset_size_for_build_borders" : 200000,
             "nan_mode" : "Min",
             "border_type" : "GreedyLogSum"
         },
@@ -228,29 +230,31 @@
     },
     "loss_function" : {
         "type" : "Logloss",
-        "params" : { }
+        "params" : [ ]
     },
     "tree_learner_options" : {
-        "max_leaves" : 64,
-        "rsm" : 1,
-        "random_strength" : 1,
-        "leaf_estimation_iterations" : 1,
-        "score_function" : "Cosine",
-        "leaf_estimation_backtracking" : "AnyImprovement",
+        "model_size_reg" : 0.5,
         "bayesian_matrix_reg" : 0.1000000015,
-        "fold_size_loss_normalization" : false,
+        "add_ridge_penalty_to_loss_function" : false,
+        "score_function" : "Cosine",
         "leaf_estimation_method" : "Newton",
+        "grow_policy" : "SymmetricTree",
+        "min_data_in_leaf" : 1,
+        "random_strength" : 1,
+        "dev_efb_max_buckets" : 254,
+        "fold_size_loss_normalization" : false,
+        "l2_leaf_reg" : 3,
         "bootstrap" : {
             "bagging_temperature" : 1,
             "type" : "Bayesian"
         },
         "dev_max_ctr_complexity_for_borders_cache" : 1,
         "observations_to_bootstrap" : "TestOnly",
-        "grow_policy" : "SymmetricTree",
-        "add_ridge_penalty_to_loss_function" : false,
-        "l2_leaf_reg" : 3,
         "depth" : 6,
-        "min_data_in_leaf" : 1
+        "max_leaves" : 64,
+        "leaf_estimation_backtracking" : "AnyImprovement",
+        "rsm" : 1,
+        "leaf_estimation_iterations" : 1
     },
     "task_type" : "GPU",
     "flat_params" : {

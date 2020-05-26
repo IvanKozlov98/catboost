@@ -72,7 +72,7 @@
 
 # We want musl to resolve itself without these sysincls, but its test must have them
 # Also we disable this headers for some libraries, that want to build withoud libc at all
-- source_filter: "^(?!(contrib/libs/musl|contrib/libs/cxxsupp/builtins|contrib/libs/cxxsupp/libcxx/include/support|contrib/libs/libunwind|contrib/tools/yasm)).*|^contrib/libs/musl/tests"
+- source_filter: "^(?!(contrib/libs/musl|contrib/libs/cxxsupp/builtins)).*|^contrib/libs/musl/tests"
   includes:
   # libc & stl common headers
   - complex.h:              contrib/libs/musl/include/complex.h
@@ -91,6 +91,7 @@
   - stdlib.h:               contrib/libs/musl/include/stdlib.h
   - string.h:               contrib/libs/musl/include/string.h
   - tgmath.h:               contrib/libs/musl/include/tgmath.h
+  - threads.h:              contrib/libs/musl/include/threads.h
   - wchar.h:                contrib/libs/musl/include/wchar.h
   - wctype.h:               contrib/libs/musl/include/wctype.h
 
@@ -236,6 +237,7 @@
   - sys/xattr.h:            contrib/libs/musl/include/sys/xattr.h
   - tar.h:                  contrib/libs/musl/include/tar.h
   - termios.h:              contrib/libs/musl/include/termios.h
+  - threads.h:              contrib/libs/musl/include/threads.h
   - time.h:                 contrib/libs/musl/include/time.h
   - uchar.h:                contrib/libs/musl/include/uchar.h
   - ucontext.h:             contrib/libs/musl/include/ucontext.h

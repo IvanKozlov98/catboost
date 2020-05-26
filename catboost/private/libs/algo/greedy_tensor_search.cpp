@@ -24,7 +24,7 @@
 #include <catboost/private/libs/algo_helpers/langevin_utils.h>
 #include <catboost/private/libs/distributed/master.h>
 
-#include <library/fast_log/fast_log.h>
+#include <library/cpp/fast_log/fast_log.h>
 
 #include <util/generic/cast.h>
 #include <util/generic/queue.h>
@@ -615,7 +615,7 @@ static void SelectCtrsToDropAfterCalc(
 
 
 static void CalcBestScore(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TSplitTree& currentTree,
     ui64 randSeed,
     double scoreStDev,
@@ -708,7 +708,8 @@ static void CalcBestScore(
                 &candidate.Candidates);
 
             AddFeaturePenaltiesToBestSplits(
-                ctx,
+                xrange(ctx->SampledDocs.LeavesCount),
+                *ctx,
                 data,
                 *fold,
                 candidatesContext.OneHotMaxSize,
@@ -755,7 +756,7 @@ static void DoBootstrap(
 }
 
 static void CalcBestScoreLeafwise(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TVector<TIndexType>& leafs,
     ui64 randSeed,
     double scoreStDev,
@@ -810,7 +811,8 @@ static void CalcBestScoreLeafwise(
                 &candidate.Candidates);
 
             AddFeaturePenaltiesToBestSplits(
-                ctx,
+                leafs,
+                *ctx,
                 data,
                 *fold,
                 candidatesContext.OneHotMaxSize,
@@ -841,7 +843,7 @@ static double CalcScoreStDev(
 }
 
 static void CalcScores(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TSplitTree& currentSplitTree,
     const double scoreStDev,
     TVector<TCandidatesContext>* candidatesContexts, // [dataset]
@@ -970,7 +972,7 @@ static TCandidatesContext SelectDatasetFeaturesForScoring(
 
 // returns vector ot per-dataset (main, online estimated, offline estimated) candidates contexts
 static TVector<TCandidatesContext> SelectFeaturesForScoring(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TMaybe<TSplitTree>& currentSplitTree,
     TFold* fold,
     TLearnContext* ctx
@@ -1030,7 +1032,7 @@ static size_t CalcMaxFeatureValueCount(
 }
 
 static void ProcessCtrSplit(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TSplit& bestSplit,
     TFold* fold,
     TLearnContext* ctx) {
@@ -1063,8 +1065,54 @@ static void MarkFeaturesAsUsed(
     split.IterateOverUsedFeatures(estimatedFeaturesContext, markFeatureAsUsed);
 }
 
+static void MarkFeaturesAsUsedPerObject(
+    const TSplit& split,
+    const TIndexedSubset<ui32>& docsSubset,
+    const TCombinedEstimatedFeaturesContext& estimatedFeaturesContext,
+    const TFeaturesLayout& layout,
+    TMap<ui32, TVector<bool>>* usedFeatures
+) {
+    const auto markFeatureAsUsed = [&docsSubset, &layout, usedFeatures](const int internalFeatureIndex, const EFeatureType type) {
+        const auto externalFeatureIndex = layout.GetExternalFeatureIdx(internalFeatureIndex, type);
+        auto it = usedFeatures->find(externalFeatureIndex);
+        if (it != usedFeatures->end()) { //if we want to keep this feature usage by objects
+            auto& perObjectUsage = it->second;
+            for (const auto idx : docsSubset) {
+                perObjectUsage[idx] = true;
+            }
+        }
+    };
+
+    split.IterateOverUsedFeatures(estimatedFeaturesContext, markFeatureAsUsed);
+}
+
+static void MarkFeaturesAsUsed(
+    const TSplit& split,
+    const TMaybe<TIndexedSubset<ui32>>& docsSubset, //if empty, apply for all objects
+    const TCombinedEstimatedFeaturesContext& estimatedFeaturesContext,
+    const TFeaturesLayout& layout,
+    TVector<bool>* usedFeatures,
+    TMap<ui32, TVector<bool>>* usedFeaturesPerObject
+) {
+    MarkFeaturesAsUsed(
+        split,
+        estimatedFeaturesContext,
+        layout,
+        usedFeatures
+    );
+    if (docsSubset.Defined()) {
+        MarkFeaturesAsUsedPerObject(
+            split,
+            docsSubset.GetRef(),
+            estimatedFeaturesContext,
+            layout,
+            usedFeaturesPerObject
+        );
+    }
+}
+
 static TSplitTree GreedyTensorSearchOblivious(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     double modelLength,
     TProfileInfo& profile,
     TVector<TIndexType>* indices,
@@ -1117,9 +1165,12 @@ static TSplitTree GreedyTensorSearchOblivious(
 
         MarkFeaturesAsUsed(
             bestSplit,
+            /*docsSubset*/ Nothing(),
             ctx->LearnProgress->EstimatedFeaturesContext,
             *ctx->Layout,
-            &ctx->LearnProgress->UsedFeatures);
+            &ctx->LearnProgress->UsedFeatures,
+            &ctx->LearnProgress->UsedFeaturesPerObject
+        );
 
         if (ctx->Params.SystemOptions->IsSingleHost()) {
             SetPermutedIndices(
@@ -1185,7 +1236,7 @@ static void SplitDocsSubset(
 }
 
 static TNonSymmetricTreeStructure GreedyTensorSearchLossguide(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     double modelLength,
     TProfileInfo& profile,
     TVector<TIndexType>* indices,
@@ -1255,14 +1306,18 @@ static TNonSymmetricTreeStructure GreedyTensorSearchLossguide(
         if (bestSplit.Type == ESplitType::OnlineCtr) {
             ProcessCtrSplit(data, bestSplit, fold, ctx);
         }
+
+        const TIndexType splittedNodeIdx = curSplitLeaf.Leaf;
         MarkFeaturesAsUsed(
             bestSplit,
+            subsetsForLeafs[splittedNodeIdx],
             ctx->LearnProgress->EstimatedFeaturesContext,
             *ctx->Layout,
-            &ctx->LearnProgress->UsedFeatures);
+            &ctx->LearnProgress->UsedFeatures,
+            &ctx->LearnProgress->UsedFeaturesPerObject
+        );
 
         const auto& node = currentStructure.AddSplit(bestSplit, curSplitLeaf.Leaf);
-        const TIndexType splittedNodeIdx = curSplitLeaf.Leaf;
         const TIndexType leftChildIdx = ~node.Left;
         const TIndexType rightChildIdx = ~node.Right;
         UpdateIndices(
@@ -1300,7 +1355,7 @@ static TNonSymmetricTreeStructure GreedyTensorSearchLossguide(
 
 
 static TNonSymmetricTreeStructure GreedyTensorSearchDepthwise(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     double modelLength,
     TProfileInfo& profile,
     TVector<TIndexType>* indices,
@@ -1359,9 +1414,12 @@ static TNonSymmetricTreeStructure GreedyTensorSearchDepthwise(
             }
             MarkFeaturesAsUsed(
                 bestSplit,
+                subsetsForLeafs[leafToSplit],
                 ctx->LearnProgress->EstimatedFeaturesContext,
                 *ctx->Layout,
-                &ctx->LearnProgress->UsedFeatures);
+                &ctx->LearnProgress->UsedFeatures,
+                &ctx->LearnProgress->UsedFeaturesPerObject
+            );
 
             const auto& node = currentStructure.AddSplit(bestSplit, leafToSplit);
             const TIndexType leftChildIdx = ~node.Left;
@@ -1404,7 +1462,7 @@ static TNonSymmetricTreeStructure GreedyTensorSearchDepthwise(
 
 
 void GreedyTensorSearch(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     double modelLength,
     TProfileInfo& profile,
     TFold* fold,

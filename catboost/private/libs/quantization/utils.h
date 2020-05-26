@@ -9,7 +9,7 @@
 
 #include <library/cpp/grid_creator/binarization.h>
 
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/system/types.h>
 #include <util/generic/array_ref.h>
@@ -179,5 +179,4 @@ namespace NCB {
         }
         return 16;
     }
-
 }

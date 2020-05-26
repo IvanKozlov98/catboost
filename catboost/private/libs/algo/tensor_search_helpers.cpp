@@ -8,7 +8,7 @@
 #include <catboost/libs/helpers/restorable_rng.h>
 #include <catboost/private/libs/options/catboost_options.h>
 
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/generic/maybe.h>
 #include <util/generic/xrange.h>
@@ -19,7 +19,7 @@ using namespace NCB;
 
 const TQuantizedForCPUObjectsDataProvider& GetLearnObjectsData(
     const TSplitCandidate& splitCandidate,
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TFold& fold
 ) {
     if (splitCandidate.Type == ESplitType::EstimatedFeature) {
@@ -33,7 +33,7 @@ const TQuantizedForCPUObjectsDataProvider& GetLearnObjectsData(
 
 
 TSplit TCandidateInfo::GetBestSplit(
-    const TTrainingForCPUDataProviders& data,
+    const TTrainingDataProviders& data,
     const TFold& fold,
     ui32 oneHotMaxSize
 ) const {
@@ -154,7 +154,7 @@ THolder<IDerCalcer> BuildError(
             return MakeHolder<TRMSEError>(isStoreExpApprox);
         case ELossFunction::MAE:
         case ELossFunction::Quantile: {
-            const auto& lossParams = params.LossFunctionDescription->GetLossParams();
+            const auto& lossParams = params.LossFunctionDescription->GetLossParamsMap();
             for (auto &param: lossParams) {
                 CB_ENSURE(
                         param.first == "alpha" || param.first == "delta",
@@ -165,7 +165,7 @@ THolder<IDerCalcer> BuildError(
             return MakeHolder<TQuantileError>(alpha, delta, isStoreExpApprox);
         }
         case ELossFunction::Expectile: {
-            const auto& lossParams = params.LossFunctionDescription->GetLossParams();
+            const auto& lossParams = params.LossFunctionDescription->GetLossParamsMap();
             if (lossParams.empty()) {
                 return MakeHolder<TExpectileError>(isStoreExpApprox);
             } else {
@@ -174,7 +174,7 @@ THolder<IDerCalcer> BuildError(
             }
         }
         case ELossFunction::LogLinQuantile: {
-            const auto& lossParams = params.LossFunctionDescription->GetLossParams();
+            const auto& lossParams = params.LossFunctionDescription->GetLossParamsMap();
             if (lossParams.empty()) {
                 return MakeHolder<TLogLinQuantileError>(isStoreExpApprox);
             } else {
@@ -202,7 +202,7 @@ THolder<IDerCalcer> BuildError(
             return MakeHolder<TQueryRmseError>(isStoreExpApprox);
         case ELossFunction::QuerySoftMax: {
             const auto& lossFunctionDescription = params.LossFunctionDescription;
-            const auto& lossParams = lossFunctionDescription->GetLossParams();
+            const auto& lossParams = lossFunctionDescription->GetLossParamsMap();
             CB_ENSURE(
                 lossParams.empty() || lossParams.begin()->first == "lambda",
                 "Invalid loss description" << ToString(lossFunctionDescription.Get()));
@@ -224,15 +224,28 @@ THolder<IDerCalcer> BuildError(
                 params.LossFunctionDescription);
             return MakeHolder<TStochasticFilterError>(sigma, numEstimations, isStoreExpApprox);
         }
+        case ELossFunction::StochasticRank: {
+            const auto& lossParams = params.LossFunctionDescription->GetLossParamsMap();
+            CB_ENSURE(lossParams.contains("metric"), "StochasticRank requires metric param");
+            const ELossFunction targetMetric = FromString<ELossFunction>(lossParams.at("metric"));
+            const double sigma = NCatboostOptions::GetParamOrDefault(lossParams, "sigma", 1.0);
+            const size_t numEstimations = NCatboostOptions::GetParamOrDefault(lossParams, "num_estimations", size_t(1));
+            const double mu = NCatboostOptions::GetParamOrDefault(lossParams, "mu", 0.0);
+            const double nu = NCatboostOptions::GetParamOrDefault(lossParams, "nu", 0.01);
+            const double lambda = NCatboostOptions::GetParamOrDefault(lossParams, "lambda", 1.0);
+            return MakeHolder<TStochasticRankError>(targetMetric, lossParams, sigma, numEstimations, mu, nu, lambda);
+        }
         case ELossFunction::PythonUserDefinedPerObject:
             return MakeHolder<TCustomError>(params, descriptor);
+        case ELossFunction::PythonUserDefinedMultiRegression:
+            return MakeHolder<TMultiRegressionCustomError>(params, descriptor);
         case ELossFunction::UserPerObjMetric:
             return MakeHolder<TUserDefinedPerObjectError>(
-                params.LossFunctionDescription->GetLossParams(),
+                    params.LossFunctionDescription->GetLossParamsMap(),
                 isStoreExpApprox);
         case ELossFunction::UserQuerywiseMetric:
             return MakeHolder<TUserDefinedQuerywiseError>(
-                params.LossFunctionDescription->GetLossParams(),
+                    params.LossFunctionDescription->GetLossParamsMap(),
                 isStoreExpApprox);
         case ELossFunction::Huber:
             return MakeHolder<THuberError>(NCatboostOptions::GetHuberParam(params.LossFunctionDescription), isStoreExpApprox);

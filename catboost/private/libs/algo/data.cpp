@@ -14,7 +14,7 @@
 #include <catboost/private/libs/target/data_providers.h>
 #include <catboost/private/libs/feature_estimator/text_feature_estimators.h>
 
-#include <library/threading/local_executor/local_executor.h>
+#include <library/cpp/threading/local_executor/local_executor.h>
 
 #include <util/generic/algorithm.h>
 #include <util/string/builder.h>
@@ -26,7 +26,7 @@ namespace NCB {
         const NCatboostOptions::TCatBoostOptions& params) {
 
         TVector<NCatboostOptions::TLossDescription> result;
-        if (params.LossFunctionDescription->GetLossFunction() != ELossFunction::PythonUserDefinedPerObject) {
+        if (!IsUserDefined(params.LossFunctionDescription->GetLossFunction())) {
             result.emplace_back(params.LossFunctionDescription);
         }
 
@@ -79,17 +79,10 @@ namespace NCB {
         trainingData->MetaInfo = srcData->MetaInfo;
         trainingData->ObjectsGrouping = srcData->ObjectsGrouping;
 
-        if (auto* quantizedObjectsDataProviderPtr
-                = dynamic_cast<TQuantizedObjectsDataProvider*>(srcData->ObjectsData.Get()))
+        if (auto* quantizedForCPUObjectsDataProvider
+                = dynamic_cast<TQuantizedForCPUObjectsDataProvider*>(srcData->ObjectsData.Get()))
         {
             if (params->GetTaskType() == ETaskType::CPU) {
-                auto quantizedForCPUObjectsDataProvider
-                    = dynamic_cast<TQuantizedForCPUObjectsDataProvider*>(quantizedObjectsDataProviderPtr);
-                CB_ENSURE(
-                    quantizedForCPUObjectsDataProvider,
-                    "Quantized objects data is not compatible with CPU task type"
-                );
-
                 /*
                  * We need data to be consecutive for efficient blocked permutations
                  * but there're cases (e.g. CV with many folds) when limiting used CPU RAM is more important
@@ -112,18 +105,19 @@ namespace NCB {
                  */
                 CB_ENSURE(
                     (srcData->MetaInfo.FeaturesLayout->GetCatFeatureCount() == 0) ||
-                    dynamic_cast<const TQuantizedForCPUObjectsDataProvider*>(quantizedObjectsDataProviderPtr),
+                    quantizedForCPUObjectsDataProvider,
                     "Quantized objects data is not compatible with final CTR calculation"
                 );
             }
 
             if (params->DataProcessingOptions.Get().IgnoredFeatures.IsSet()) {
-                trainingData->ObjectsData = dynamic_cast<TQuantizedObjectsDataProvider*>(
-                    quantizedObjectsDataProviderPtr->GetFeaturesSubset(
+                trainingData->ObjectsData = dynamic_cast<TQuantizedForCPUObjectsDataProvider*>(
+                    quantizedForCPUObjectsDataProvider->GetFeaturesSubset(
                         params->DataProcessingOptions.Get().IgnoredFeatures,
-                        localExecutor).Get());
+                        localExecutor).Get()
+                );
             } else {
-                trainingData->ObjectsData = quantizedObjectsDataProviderPtr;
+                trainingData->ObjectsData = quantizedForCPUObjectsDataProvider;
             }
         } else {
             trainingData->ObjectsData = GetQuantizedObjectsData(
@@ -160,13 +154,15 @@ namespace NCB {
         TInputClassificationInfo inputClassificationInfo {
             dataProcessingOptions.ClassesCount.Get() ? TMaybe<ui32>(dataProcessingOptions.ClassesCount.Get()) : Nothing(),
             dataProcessingOptions.ClassWeights.Get(),
+            dataProcessingOptions.AutoClassWeights.Get(),
             dataProcessingOptions.ClassLabels.Get(),
             *targetBorder
         };
         TOutputClassificationInfo outputClassificationInfo {
             dataProcessingOptions.ClassLabels.Get(),
             labelConverter,
-            *targetBorder
+            *targetBorder,
+            dataProcessingOptions.ClassWeights.Get()
         };
         TOutputPairsInfo outputPairsInfo;
 
@@ -209,6 +205,10 @@ namespace NCB {
         trainingData->MetaInfo.HasWeights |= !inputClassificationInfo.ClassWeights.empty();
         dataProcessingOptions.ClassLabels.Get() = outputClassificationInfo.ClassLabels;
         *targetBorder = outputClassificationInfo.TargetBorder;
+
+        if (!outputClassificationInfo.ClassWeights.Empty()) {
+            dataProcessingOptions.ClassWeights.Get() = *outputClassificationInfo.ClassWeights.Get();
+        }
 
         trainingData->UpdateMetaInfo();
 
@@ -421,7 +421,7 @@ namespace NCB {
                     /*learnPermutation*/ Nothing(), // offline features
                     localExecutor,
                     rand
-                ).Cast<TQuantizedObjectsDataProvider>();
+                );
             }
         }
 

@@ -2,7 +2,7 @@
 #include "print.h"
 #include "serialization.h"
 
-#include <library/unittest/registar.h>
+#include <library/cpp/unittest/registar.h>
 
 #include <contrib/libs/flatbuffers/include/flatbuffers/flatbuffers.h>
 #include <contrib/libs/protobuf/util/message_differencer.h>
@@ -114,6 +114,7 @@ static void CompareQuantizedPoolDigests(
     UNIT_ASSERT_VALUES_EQUAL(lhs.NumericFeature1BitCount, rhs.NumericFeature1BitCount);
     UNIT_ASSERT_VALUES_EQUAL(lhs.NumericFeature4BitCount, rhs.NumericFeature4BitCount);
     UNIT_ASSERT_VALUES_EQUAL(lhs.NumericFeature8BitCount, rhs.NumericFeature8BitCount);
+    UNIT_ASSERT_VALUES_EQUAL(lhs.NumericFeature16BitCount, rhs.NumericFeature16BitCount);
 
     UNIT_ASSERT_VALUES_EQUAL(lhs.NonFeatureColumnCount, rhs.NonFeatureColumnCount);
 

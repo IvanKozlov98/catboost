@@ -15,7 +15,7 @@
 #include <catboost/libs/data/packed_binary_features.h>
 #include <catboost/private/libs/options/enums.h>
 
-#include <library/binsaver/bin_saver.h>
+#include <library/cpp/binsaver/bin_saver.h>
 
 #include <util/generic/array_ref.h>
 #include <util/generic/maybe.h>
@@ -44,7 +44,7 @@ public:
     SAVELOAD(SplitEnsemble, BestScore, BestBinId);
 
     TSplit GetBestSplit(
-        const NCB::TTrainingForCPUDataProviders& data,
+        const NCB::TTrainingDataProviders& data,
         const TFold& fold,
         ui32 oneHotMaxSize
     ) const;

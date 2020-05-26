@@ -1,3 +1,90 @@
+# Release 0.23.1
+
+## New functionality
+* CatBoost model could be simply converted into ONNX object in Python with `catboost.utils.convert_to_onnx_object` method. Implemented by @monkey0head
+* We now print metric options with metric names as metric description in error logs by default. This allows you to distinguish between metrics of the same type with different parameters. For example, if user sets weigheted average `TotalF1` metric CatBoost will print `TotalF1:average=Weighted` as corresponding metric column header in error logs. Implemented by @ivanychev
+* Implemented PRAUC metric (issue  #737). Thanks @azikmsu
+* It's now possible to write custom multiregression objective in Python. Thanks @azikmsu
+* Supported nonsymmetric models export to PMML
+* `class_weights` parameter accepts dictionary with class name to class weight mapping
+* Added `_get_tags()` method for compatibility with sklearn (issue #1282). Implemented by @crazyleg
+* Lot's of improvements in .Net CatBoost library: implemented IDisposable interface, splitted ML.NET compatible and basic prediction classes in separate libraries, added base UNIX compatibility, supported GPU model evaluation, fixed tests. Thanks @khanova
+* In addition to first_feature_use_penalties presented in the previous release, we added new option per_object_feature_penalties which considers feature usage on each object individually. For more details refer the [tutorial](https://github.com/catboost/catboost/blob/master/catboost/tutorials/feature_penalties/feature_penalties.ipynb).
+
+## Breaking changes
+* From now on we require explicit `loss_function` param in python `cv` method.
+
+## Bugfixes:
+* Fixed deprecation warning on import (issue #1269)
+* Fixed saved models logging_level/verbose parameters conflict (issue #696)
+* Fixed kappa metric - in some cases there were integer overflow, switched accumulation types to double
+* Fixed per float feature quantization settings defaults
+
+## Educational materials
+* Extended shap values [tutorial](https://github.com/catboost/tutorials/blob/master/model_analysis/shap_values_tutorial.ipynb) with summary plot examples. Thanks @azanovivan02
+
+
+# Release 0.23
+
+## New functionality
+
+* It is possible now to train models on huge datasets that do not fit into CPU RAM.
+This can be accomplished by storing only quantized data in memory (it is many times smaller). Use `catboost.utils.quantize` function to create quantized `Pool ` this way. See usage example in the issue #1116.
+ Implemented by @noxwell.
+* Python Pool class now has `save_quantization_borders` method that allows to save resulting borders into a [file](https://catboost.ai/docs/concepts/output-data_custom-borders.html) and use it for quantization of other datasets. Quantization can be a bottleneck of training, especially on GPU. Doing quantization once for several trainings can significantly reduce running time. It is recommended for large dataset to perform quantization first, save quantization borders, use them to quantize validation dataset, and then use quantized training and validation datasets for further training.
+Use saved borders when quantizing other Pools by specifying `input_borders` parameter of the `quantize` method.
+Implemented by @noxwell.
+* Text features are supported on CPU
+* It is now possible to set `border_count` > 255 for GPU training. This might be useful if you have a "golden feature", see [docs](https://catboost.ai/docs/concepts/parameter-tuning.html#golden-features).
+* Feature weights are implemented.
+Specify weights for specific features by index or name like `feature_weights="FeatureName1:1.5,FeatureName2:0.5"`.
+Scores for splits with this features will be multiplied by corresponding weights.
+Implemented by @Taube03.
+* Feature penalties can be used for cost efficient gradient boosting.
+Penalties are specified in a similar fashion to feature weights, using parameter `first_feature_use_penalties`.
+This parameter penalized the first usage of a feature. This should be used in case if the calculation of the feature is costly.
+The penalty value (or the cost of using a feature) is subtracted from scores of the splits of this feature if feature has not been used in the model.
+After the feature has been used once, it is considered free to proceed using this feature, so no substruction is done.
+There is also a common multiplier for all `first_feature_use_penalties`, it can be specified by `penalties_coefficient` parameter.
+Implemented by @Taube03 (issue #1155)
+* `recordCount` attribute is added to PMML models (issue #1026).
+
+## New losses and metrics
+
+* New ranking objective 'StochasticRank', details in [paper](https://arxiv.org/abs/2003.02122).
+* `Tweedie` loss is supported now. It can be a good solution for right-skewed target with many zero values, see [tutorial](https://github.com/catboost/tutorials/blob/master/regression/tweedie.ipynb).
+When using `CatBoostRegressor.predict` function, default `prediction_type` for this loss will be equal to `Exponent`. Implemented by @ilya-pchelintsev (issue #577)
+* Classification metrics now support a new parameter `proba_border`. With this parameter you can set decision boundary for treating prediction as negative or positive. Implemented by @ivanychev.
+* Metric `TotalF1` supports a new parameter `average` with possible value `weighted`, `micro`, `macro`. Implemented by @ilya-pchelintsev.
+* It is possible now to specify a custom multi-label metric in python. Note that it is only possible to calculate this metric and use it as `eval_metric`. It is not possible to used it as an optimization objective.
+To write a multi-label metric, you need to define a python class which inherits from `MultiLabelCustomMetric` class. Implemented by @azikmsu.
+
+## Improvements of grid and randomized search
+
+* `class_weights` parameter is now supported in grid/randomized search. Implemented by @vazgenk.
+* Invalid option configurations are automatically skipped during grid/randomized search. Implemented by @borzunov.
+* `get_best_score` returns train/validation best score after grid/randomized search (in case of refit=False). Implemented by @rednevaler.
+
+## Improvements of model analysis tools
+
+* Computation of SHAP interaction values for CatBoost models. You can pass type=EFstrType.ShapInteractionValues to `CatBoost.get_feature_importance` to get a matrix of SHAP values for every prediction.
+By default, SHAP interaction values are calculated for all features. You may specify features of interest using the `interaction_indices` argument.
+Implemented by @IvanKozlov98.
+* SHAP values can be calculated approximately now which is much faster than default mode. To use this mode specify `shap_calc_type` parameter of  `CatBoost.get_feature_importance` function as  `"Approximate"`. Implemented by @LordProtoss (issue #1146).
+* `PredictionDiff` model analysis method can now be used with models that contain non symmetric trees. Implemented by @felixandrer.
+
+## New educational materials
+
+* A [tutorial](https://github.com/catboost/tutorials/blob/master/regression/tweedie.ipynb) on tweedie regression
+* A [tutorial](https://github.com/catboost/tutorials/blob/master/regression/poisson.ipynb) on poisson regression
+* A detailed [tutorial](https://github.com/catboost/tutorials/blob/master/metrics/AUC_tutorial.ipynb) on different types of AUC metric, which explains how different types of AUC can be used for binary classification, multiclassification and ranking tasks.
+
+## Breaking changes
+
+* When using `CatBoostRegressor.predict` function for models trained with `Poisson` loss, default `prediction_type` will be equal to `Exponent` (issue #1184). Implemented by @garkavem.
+
+This release also contains bug fixes and performance improvements, including a major speedup for sparse data on GPU.
+
 # Release 0.22
 
 ## New features:
@@ -33,7 +120,7 @@ The release also contains a list of bug fixes.
 - Target border and class weights are now taken from model when necessary for feature strength, metrics evaluation, roc_curve, object importances and calc_feature_statistics calculations.
 - Fixed that L2 regularization was not applied for non symmetric trees for binary classification on GPU.
 - [R-package] Fixed the bug that ``catboost.get_feature_importance`` did not work after model is loaded #1064
-- [R-package] Fixed the bug that ``catboost.train`` did not work when called with the single dataset parameter. #1162 
+- [R-package] Fixed the bug that ``catboost.train`` did not work when called with the single dataset parameter. #1162
 - Fixed L2 score calculation on CPU
 
 ##Other:
