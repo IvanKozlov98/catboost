@@ -15,7 +15,7 @@ using namespace NCB;
 
 
 TVector<double> CollectLeavesStatistics(
-    const NCB::TDataProvider& dataset,
+    const TDataProvider& dataset,
     const TFullModel& model,
     NPar::TLocalExecutor* localExecutor) {
 
@@ -79,16 +79,27 @@ TVector<double> CollectLeavesStatistics(
     return leavesStatistics;
 }
 
-bool TryGetLossDescription(const TFullModel& model, NCatboostOptions::TLossDescription& lossDescription) {
+bool TryGetLossDescription(const TFullModel& model, NCatboostOptions::TLossDescription* lossDescription) {
     if (!(model.ModelInfo.contains("loss_function") ||  model.ModelInfo.contains("params") && ReadTJsonValue(model.ModelInfo.at("params")).Has("loss_function"))) {
         return false;
     }
     if (model.ModelInfo.contains("loss_function")) {
-        lossDescription.Load(ReadTJsonValue(model.ModelInfo.at("loss_function")));
+        lossDescription->Load(ReadTJsonValue(model.ModelInfo.at("loss_function")));
     } else {
-        lossDescription.Load(ReadTJsonValue(model.ModelInfo.at("params"))["loss_function"]);
+        lossDescription->Load(ReadTJsonValue(model.ModelInfo.at("params"))["loss_function"]);
     }
     return true;
+}
+
+bool TryGetObjectiveMetric(const TFullModel& model, NCatboostOptions::TLossDescription* lossDescription) {
+    if (model.ModelInfo.contains("params")) {
+        const auto &params = ReadTJsonValue(model.ModelInfo.at("params"));
+        if (params.Has("metrics") && params["metrics"].Has("objective_metric")) {
+            lossDescription->Load(params["metrics"]["objective_metric"]);
+            return true;
+        }
+    }
+    return TryGetLossDescription(model, lossDescription);
 }
 
 void CheckNonZeroApproxForZeroWeightLeaf(const TFullModel& model) {
@@ -102,4 +113,21 @@ void CheckNonZeroApproxForZeroWeightLeaf(const TFullModel& model) {
             CB_ENSURE(leafSumApprox < 1e-9, "Cannot calc shap values, model contains non zero approx for zero-weight leaf");
         }
     }
+}
+
+TVector<int> GetBinFeatureCombinationClassByDepth(
+    const TModelTrees& forest,
+    const TVector<int>& binFeatureCombinationClass,
+    size_t treeIdx
+) {
+    const size_t depthOfTree = forest.GetTreeSizes()[treeIdx];
+    TVector<int> binFeatureCombinationClassByDepth(depthOfTree);
+    for (size_t depth = 0; depth < depthOfTree; ++depth) {
+		const size_t remainingDepth = depthOfTree - depth - 1;
+        const int combinationClass = binFeatureCombinationClass[
+            forest.GetTreeSplits()[forest.GetTreeStartOffsets()[treeIdx] + remainingDepth]
+        ];
+        binFeatureCombinationClassByDepth[depth] = combinationClass;
+    }
+    return binFeatureCombinationClassByDepth;
 }

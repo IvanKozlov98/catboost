@@ -243,17 +243,6 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectAverageChange(
     return result;
 }
 
-static bool TryGetObjectiveMetric(const TFullModel& model, NCatboostOptions::TLossDescription& lossDescription) {
-    if (model.ModelInfo.contains("params")) {
-        const auto &params = ReadTJsonValue(model.ModelInfo.at("params"));
-        if (params.Has("metrics") && params["metrics"].Has("objective_metric")) {
-            lossDescription.Load(params["metrics"]["objective_metric"]);
-            return true;
-        }
-    }
-    return TryGetLossDescription(model, lossDescription);
-}
-
 static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
     const TFullModel& model,
     const TDataProvider& dataProvider,
@@ -262,7 +251,7 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
 )
 {
     NCatboostOptions::TLossDescription metricDescription;
-    CB_ENSURE(TryGetObjectiveMetric(model, metricDescription), "Cannot calculate LossFunctionChange feature importances without metric, need model with params");
+    CB_ENSURE(TryGetObjectiveMetric(model, &metricDescription), "Cannot calculate LossFunctionChange feature importances without metric, need model with params");
     CATBOOST_INFO_LOG << "Used " << metricDescription << " metric for fstr calculation" << Endl;
     int approxDimension = model.ModelTrees->GetDimensionsCount();
     
@@ -286,9 +275,15 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
     TRestorableFastRng64 rand(0);
     auto targetData = CreateModelCompatibleProcessedDataProvider(dataset, {metricDescription}, model, GetMonopolisticFreeCpuRam(), &rand, localExecutor).TargetData;
     CB_ENSURE(targetData->GetTargetDimension() <= 1, "Multi-dimensional target fstr is unimplemented yet");
-
-    TShapPreparedTrees preparedTrees = PrepareTrees(model, &dataset, EPreCalcShapValues::Auto, localExecutor, true,
-            calcType);
+    TShapPreparedTrees preparedTrees = PrepareTrees(
+        model,
+        &dataset,
+        /*referenceDataset*/ nullptr,
+        EPreCalcShapValues::Auto,
+        localExecutor,
+        true,
+        calcType
+    );
     CalcShapValuesByLeaf(
         model,
         /*fixedFeatureParams*/ Nothing(),
@@ -309,7 +304,7 @@ static TVector<std::pair<double, TFeature>> CalcFeatureEffectLossChange(
     ui32 blockSize = Min(ui32(10000), ui32(1e6) / (featuresCount * approx.ysize())); // shapValues[blockSize][featuresCount][dim] double
 
     NCatboostOptions::TLossDescription lossDescription;
-    CB_ENSURE(TryGetLossDescription(model, lossDescription), "No loss_function in model params");
+    CB_ENSURE(TryGetLossDescription(model, &lossDescription), "No loss_function in model params");
 
     // NDCG and PFound metrics are possible for YetiRank
     // PFound replace with PairLogit (with YetiRank generated pairs) due to quality
@@ -714,12 +709,13 @@ TVector<TVector<double>> GetFeatureImportances(
     const EFstrType fstrType,
     const TFullModel& model,
     const TDataProviderPtr dataset, // can be nullptr
+    const TDataProviderPtr referenceDataset, // can be nullptr
     int threadCount,
     EPreCalcShapValues mode,
     int logPeriod,
-    ECalcTypeShapValues calcType
-)
-{
+    ECalcTypeShapValues calcType,
+    EModelOutputType modelOutputType
+) {
     TSetLoggingVerboseOrSilent inThisScope(logPeriod);
     CB_ENSURE(model.GetTreeCount(), "Model is not trained");
     if (dataset) {
@@ -748,8 +744,8 @@ TVector<TVector<double>> GetFeatureImportances(
             NPar::TLocalExecutor localExecutor;
             localExecutor.RunAdditionalThreads(threadCount - 1);
 
-            return CalcShapValues(model, *dataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor,
-                                  calcType);
+            return CalcShapValues(model, *dataset, referenceDataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor,
+                                  calcType, modelOutputType);
         }
         case EFstrType::PredictionDiff: {
             NPar::TLocalExecutor localExecutor;
@@ -767,12 +763,13 @@ TVector<TVector<TVector<double>>> GetFeatureImportancesMulti(
     const EFstrType fstrType,
     const TFullModel& model,
     const TDataProviderPtr dataset,
+    const TDataProviderPtr referenceDataset, // can be nullptr
     int threadCount,
     EPreCalcShapValues mode,
     int logPeriod,
-    ECalcTypeShapValues calcType
-)
-{
+    ECalcTypeShapValues calcType,
+    EModelOutputType modelOutputType
+) {
     TSetLoggingVerboseOrSilent inThisScope(logPeriod);
     CB_ENSURE(model.GetTreeCount(), "Model is not trained");
 
@@ -785,8 +782,8 @@ TVector<TVector<TVector<double>>> GetFeatureImportancesMulti(
     NPar::TLocalExecutor localExecutor;
     localExecutor.RunAdditionalThreads(threadCount - 1);
 
-    return CalcShapValuesMulti(model, *dataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor,
-                               calcType);
+    return CalcShapValuesMulti(model, *dataset, referenceDataset, /*fixedFeatureParams*/ Nothing(), logPeriod, mode, &localExecutor,
+                               calcType, modelOutputType);
 }
 
 TVector<TVector<TVector<TVector<double>>>> CalcShapFeatureInteractionMulti(
@@ -799,7 +796,7 @@ TVector<TVector<TVector<TVector<double>>>> CalcShapFeatureInteractionMulti(
     int logPeriod,
     ECalcTypeShapValues calcType
 ) {
-    ValidateFeatureInteractionParams(fstrType, model, dataset);
+    ValidateFeatureInteractionParams(fstrType, model, dataset, calcType);
     if (pairOfFeatures.Defined()) {
         const int flatFeatureCount = SafeIntegerCast<int>(dataset->MetaInfo.GetFeatureCount());
         ValidateFeaturePair(flatFeatureCount, pairOfFeatures.GetRef());
