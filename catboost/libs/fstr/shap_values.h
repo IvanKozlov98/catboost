@@ -122,11 +122,13 @@ TVector<TVector<TVector<double>>> CalcShapValueWithQuantizedData(
 void CalcAndOutputShapValues(
     const TFullModel& model,
     const NCB::TDataProvider& dataset,
+    const NCB::TDataProviderPtr referenceDataset,
     const TString& outputPath,
     int logPeriod,
     EPreCalcShapValues mode,
     NPar::TLocalExecutor* localExecutor,
-    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular
+    ECalcTypeShapValues calcType = ECalcTypeShapValues::Regular,
+    EExplainableModelOutput modelOutputType = EExplainableModelOutput::Raw
 );
 
 void CalcShapValuesInternalForFeature(
