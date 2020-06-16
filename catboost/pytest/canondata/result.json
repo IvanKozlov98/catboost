@@ -8507,6 +8507,12 @@
             "uri": "file://test.test_shap_exact/shapval"
         }
     ],
+    "test.test_shap_independent": [
+        {
+            "checksum": "82159eb2c50645813d52e30df1369754",
+            "uri": "file://test.test_shap_independent/shapval"
+        }
+    ],
     "test.test_shrink_model[Ordered-SymmetricTree]": [
         {
             "checksum": "086c6063ade9c34af13a6f195847a924",

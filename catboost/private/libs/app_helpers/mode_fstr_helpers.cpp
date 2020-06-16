@@ -95,6 +95,17 @@ void NCB::PrepareFstrModeParamsParser(
                     calcType + " shap calculation type is not supported");
         });
 
+    parser.AddLongOption("model-output")
+        .DefaultValue("Raw")
+        .Handler1T<TString>([&params](const TString& modelOutputType) {
+            CB_ENSURE(TryFromString<EExplainableModelOutput>(modelOutputType, params.ExplainableModelOutput),
+                    modelOutputType + " model output type is not supported");
+        });
+
+    parser.AddLongOption("reference-data-path")
+            .StoreResult(&params.ReferenceDatasetPath)
+            .RequiredArgument("PATH");
+
     parser.AddLongOption("verbose", "Log writing period")
         .DefaultValue("0")
         .Handler1T<TString>([&params](const TString& verbose) {
@@ -105,7 +116,8 @@ void NCB::PrepareFstrModeParamsParser(
 }
 
 void NCB::ModeFstrSingleHost(const NCB::TAnalyticalModeCommonParams& params) {
-    params.DatasetReadingParams.ValidatePoolParams();
+    const auto& datasetReadingParams = params.DatasetReadingParams;  
+    datasetReadingParams.ValidatePoolParams();
 
     TFullModel model = ReadModel(params.ModelFileName, params.ModelFormat);
     if (model.HasCategoricalFeatures()) {
@@ -118,7 +130,7 @@ void NCB::ModeFstrSingleHost(const NCB::TAnalyticalModeCommonParams& params) {
     localExecutor->RunAdditionalThreads(params.ThreadCount - 1);
 
     TLazyPoolLoader poolLoader(params, model, localExecutor);
-    TFsPath inputPath(params.DatasetReadingParams.PoolPath.Path);
+    TFsPath inputPath(datasetReadingParams.PoolPath.Path);
     auto fstrType = AdjustFeatureImportanceType(params.FstrType, model.GetLossFunctionName());
     if (fstrType != EFstrType::PredictionValuesChange) {
         CB_ENSURE_SCALE_IDENTITY(model.GetScaleAndBias(), "model fstr");
@@ -126,6 +138,24 @@ void NCB::ModeFstrSingleHost(const NCB::TAnalyticalModeCommonParams& params) {
     bool isInternalFstr = IsInternalFeatureImportanceType(params.FstrType);
     const TString* fstrPathPtr = isInternalFstr ? nullptr : &(params.OutputPath.Path);
     const TString* internalFstrPathPtr = !isInternalFstr ? nullptr : &(params.OutputPath.Path);
+    NCB::TDataProviderPtr referenceDataset = nullptr;
+    if (params.ReferenceDatasetPath.Inited()) {
+        NCatboostOptions::ValidatePoolParams(params.ReferenceDatasetPath, datasetReadingParams.ColumnarPoolFormatParams); 
+        referenceDataset = NCB::ReadDataset(/*taskType*/Nothing(),
+                                            datasetReadingParams.PoolPath,
+                                            /*pairsFilePath=*/NCB::TPathWithScheme(),
+                                            /*groupWeightsFilePath=*/NCB::TPathWithScheme(),
+                                            /*baselineFilePath=*/ NCB::TPathWithScheme(),
+                                            /*timestampsFilePath=*/ NCB::TPathWithScheme(),
+                                            /*featureNamesPath=*/ NCB::TPathWithScheme(),
+                                            datasetReadingParams.ColumnarPoolFormatParams,
+                                            /*ignoredFeatures*/ {},
+                                            NCB::EObjectsOrder::Undefined,
+                                            NCB::TDatasetSubset::MakeColumns(),
+                                            /*classLabels*/ Nothing(),
+                                            localExecutor.Get());
+        CheckModelAndDatasetCompatibility(model, *referenceDataset->ObjectsData.Get());
+    }
 
     switch (fstrType) {
         case EFstrType::PredictionValuesChange:
@@ -150,11 +180,13 @@ void NCB::ModeFstrSingleHost(const NCB::TAnalyticalModeCommonParams& params) {
         case EFstrType::ShapValues:
             CalcAndOutputShapValues(model,
                                     *poolLoader(),
+                                    referenceDataset,
                                     params.OutputPath.Path,
                                     params.Verbose,
                                     EPreCalcShapValues::Auto,
                                     localExecutor.Get(),
-                                    params.ShapCalcType);
+                                    params.ShapCalcType,
+                                    params.ExplainableModelOutput);
             break;
         case EFstrType::PredictionDiff:
             CalcAndOutputPredictionDiff(
