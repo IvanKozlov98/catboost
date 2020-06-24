@@ -1589,20 +1589,23 @@ static void OutputShapValuesMulti(const TVector<TVector<TVector<double>>>& shapV
 void CalcAndOutputShapValues(
     const TFullModel& model,
     const TDataProvider& dataset,
+    const NCB::TDataProviderPtr referenceDataset,
     const TString& outputPath,
     int logPeriod,
     EPreCalcShapValues mode,
     NPar::TLocalExecutor* localExecutor,
-    ECalcTypeShapValues calcType
+    ECalcTypeShapValues calcType,
+    EExplainableModelOutput modelOutputType
 ) {
     TShapPreparedTrees preparedTrees = PrepareTrees(
         model,
         &dataset,
-        /*referenceDataset*/ nullptr,
+        referenceDataset,
         mode,
         localExecutor,
         /*calcInternalValues*/ false,
-        calcType
+        calcType,
+        modelOutputType
     );
     CalcShapValuesByLeaf(
         model,

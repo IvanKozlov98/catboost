@@ -28,6 +28,8 @@ namespace NCB {
         int ThreadCount = NSystemInfo::CachedNumberOfCpus();
 
         ECalcTypeShapValues ShapCalcType = ECalcTypeShapValues::Regular;
+        NCB::TPathWithScheme ReferenceDatasetPath;
+        EExplainableModelOutput ExplainableModelOutput = EExplainableModelOutput::Raw; 
 
         void BindParserOpts(NLastGetopt::TOpts& parser);
     };
