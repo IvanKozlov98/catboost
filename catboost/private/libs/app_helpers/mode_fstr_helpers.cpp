@@ -42,10 +42,10 @@ namespace {
 
                 TSetLoggingVerboseOrSilent inThisScope(false);
 
-                Dataset = NCB::ReadDataset(/*taskType*/Nothing(),
+                Dataset = NCB::ReadDataset(/*taskType*/ Nothing(),
                                            Params.DatasetReadingParams.PoolPath,
                                            Params.DatasetReadingParams.PairsFilePath,
-                                           /*groupWeightsFilePath=*/NCB::TPathWithScheme(),
+                                           /*groupWeightsFilePath=*/ NCB::TPathWithScheme(),
                                            /*baselineFilePath=*/ NCB::TPathWithScheme(),
                                            /*timestampsFilePath=*/ NCB::TPathWithScheme(),
                                            /*featureNamesPath=*/ NCB::TPathWithScheme(),
@@ -141,10 +141,10 @@ void NCB::ModeFstrSingleHost(const NCB::TAnalyticalModeCommonParams& params) {
     NCB::TDataProviderPtr referenceDataset = nullptr;
     if (params.ReferenceDatasetPath.Inited()) {
         NCatboostOptions::ValidatePoolParams(params.ReferenceDatasetPath, datasetReadingParams.ColumnarPoolFormatParams); 
-        referenceDataset = NCB::ReadDataset(/*taskType*/Nothing(),
+        referenceDataset = NCB::ReadDataset(/*taskType*/ Nothing(),
                                             params.ReferenceDatasetPath,
-                                            /*pairsFilePath=*/NCB::TPathWithScheme(),
-                                            /*groupWeightsFilePath=*/NCB::TPathWithScheme(),
+                                            /*pairsFilePath=*/ NCB::TPathWithScheme(),
+                                            /*groupWeightsFilePath=*/ NCB::TPathWithScheme(),
                                             /*baselineFilePath=*/ NCB::TPathWithScheme(),
                                             /*timestampsFilePath=*/ NCB::TPathWithScheme(),
                                             /*featureNamesPath=*/ NCB::TPathWithScheme(),
